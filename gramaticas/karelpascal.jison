@@ -20,6 +20,8 @@
 "define-prototipo-instrucción"              { return 'PROTO'; }
 "sal-de-instruccion"                        { return 'RET'; }
 "sal-de-instrucción"                        { return 'RET'; }
+"memoria"                                   { return 'MEMO'; }
+"="                                         { return 'ASSIGN'; }
 "como"                                      { return 'AS'; }
 "apagate"                                   { return 'HALT'; }
 "apágate"                                   { return 'HALT'; }
@@ -67,6 +69,8 @@
 "e"                                         { return 'AND'; }
 "("                                         { return '('; }
 ")"                                         { return ')'; }
+"["                                         { return '['; }
+"]"                                         { return ']'; }
 ";"                                         { return ';'; }
 [0-9]+                                      { return 'NUM'; }
 [A-Za-zÀ-ÖØ-öø-ÿ_][A-Za-zÀ-ÖØ-öø-ÿ0-9_-]*   { return 'VAR'; }
@@ -242,6 +246,8 @@ expr
     { $$ = $repeat; }
   | BEGIN expr_list END
     { $$ = $expr_list; }
+  | MEMO '[' integer ']' ASSIGN integer
+    {  $$ = [['LINE', yylineno] ].concat($3).concat($6).concat([['MEMORIZE']]); }
   ;
 
 call
@@ -346,6 +352,8 @@ integer
     { $$ = $integer.concat([['INC']]); }
   | DEC	 '(' integer ')'
     { $$ = $integer.concat([['DEC']]); }
+  | MEMO '[' integer ']'
+    { $$ = $integer.concat([['MEMO']]);}
   ;
 
 var

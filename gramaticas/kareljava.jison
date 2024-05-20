@@ -55,6 +55,7 @@
 "}"                             { return 'END'; }
 ","                             { return ','; }
 ";"                             { return ';'; }
+"="                             { return 'ASSIGN'; }
 [0-9]+                          { return 'NUM'; }
 [a-zA-Z][a-zA-Z0-9_]*           { return 'VAR'; }
 <<EOF>>                         { return 'EOF'; }
@@ -176,7 +177,7 @@ expr
     { $$ = [['LINE', yylineno], ['HALT']]; }
   | RET '(' ')' ';'
     { $$ = [['LINE', yylineno], ['RET']]; }
-  | MEMORIZE '(' integer ',' integer ')' ';'
+  | MEMO '[' integer ']' ASSIGN integer ';'
     { $$ = [['LINE', yylineno] ].concat($3).concat($5).concat([['MEMORIZE']]); }
   | call ';'
     { $$ = $call; }
