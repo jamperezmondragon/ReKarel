@@ -138,6 +138,8 @@ Runtime.INC = 24;
 Runtime.CALL = 25;
 Runtime.RET = 26;
 Runtime.PARAM = 27;
+Runtime.MEMO = 28;
+Runtime.MEMORIZE = 29;
 
 Runtime.prototype.load = function (opcodes) {
   var self = this;
@@ -170,6 +172,8 @@ Runtime.prototype.load = function (opcodes) {
     'CALL',
     'RET',
     'PARAM',
+    'MEMO',
+    'MEMORIZE',
   ];
   var error_mapping = ['WALL', 'WORLDUNDERFLOW', 'BAGUNDERFLOW', 'INSTRUCTION'];
 
@@ -214,6 +218,7 @@ Runtime.prototype.reset = function () {
     line: -1,
     ic: 0,
     stack: new Int32Array(new ArrayBuffer((0xffff * 16 + 40) * 4)),
+    heap: new Int32Array(new ArrayBuffer((0xffff * 16 + 40) * 4)),
     stackSize: 0,
 
     // Instruction counts
@@ -541,6 +546,16 @@ Runtime.prototype.next = function () {
         break;
       }
 
+      case Runtime.MEMO: {
+        self.state.stack[self.state.sp] = self.state.heap[self.state.stack[self.state.sp]];
+        break;
+      }
+      case Runtime.MEMORIZE: {
+        self.state.heap[self.state.stack[self.state.sp-1]]=self.state.stack[self.state.sp];
+        self.state.sp-=2;
+        break;
+      }
+
       default: {
         self.state.running = false;
         if (self.debug) {
@@ -589,16 +604,17 @@ Runtime.prototype.next = function () {
   return true;
 };
 
-var World = function (w, h) {
+var World = function (w, h, heapSize) {
   var self = this;
 
-  self.init(w, h);
+
+  self.init(w, h, heapSize);
 };
 
 World.prototype.reset = function () {
   var self = this;
 
-  self.init(self.w, self.h);
+  self.init(self.w, self.h, self.heapSize);
 };
 
 World.prototype.createMaps = function () {
@@ -623,11 +639,12 @@ World.prototype.createMaps = function () {
   }
 };
 
-World.prototype.init = function (w, h) {
+World.prototype.init = function (w, h, heapSize) {
   var self = this;
 
   self.w = w;
   self.h = h;
+  self.heapSize = heapSize;
   self.runtime = new Runtime(self);
   self.createMaps();
 
@@ -713,6 +730,7 @@ World.prototype.clear = function () {
   self.dumps = {};
   self.dumpCells = [];
   self.maxInstructions = 10000000;
+  self.heapSize =
   self.maxMove = -1;
   self.maxTurnLeft = -1;
   self.maxPickBuzzer = -1;

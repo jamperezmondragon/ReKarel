@@ -16,10 +16,12 @@
 "move" 		                { return 'FORWARD'; }
 "pickbeeper"	                { return 'PICKBUZZER'; }
 "putbeeper"                     { return 'LEAVEBUZZER'; }
+"memorize"                     { return 'MEMORIZE'; }
 "while"                         { return 'WHILE'; }
 "iterate"                       { return 'REPEAT'; }
 "pred" 		                { return 'DEC'; }
 "succ"          	        { return 'INC'; }
+"memo"          	        { return 'MEMO'; }
 "iszero" 	                { return 'IFZ'; }
 "frontIsClear"                  { return 'IFNFWALL'; }
 "frontIsBlocked"                { return 'IFFWALL'; }
@@ -47,8 +49,11 @@
 "&"				{ return 'AND'; }
 "("                             { return '('; }
 ")"                             { return ')'; }
+"["                             { return '['; }
+"]"                             { return ']'; }
 "{"                             { return 'BEGIN'; }
 "}"                             { return 'END'; }
+","                             { return ','; }
 ";"                             { return ';'; }
 [0-9]+                          { return 'NUM'; }
 [a-zA-Z][a-zA-Z0-9_]*           { return 'VAR'; }
@@ -171,6 +176,8 @@ expr
     { $$ = [['LINE', yylineno], ['HALT']]; }
   | RET '(' ')' ';'
     { $$ = [['LINE', yylineno], ['RET']]; }
+  | MEMORIZE '(' integer ',' integer ')' ';'
+    { $$ = [['LINE', yylineno] ].concat($3).concat($5).concat([['MEMORIZE']]); }
   | call ';'
     { $$ = $call; }
   | cond
@@ -289,6 +296,8 @@ integer
     { $$ = $integer.concat([['INC']]); }
   | DEC	 '(' integer ')'
     { $$ = $integer.concat([['DEC']]); }
+  | MEMO '[' integer ']'
+    { $$ = $integer.concat([['MEMO']]); }
   ;
 
 var
