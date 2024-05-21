@@ -21,7 +21,7 @@
 "sal-de-instruccion"                        { return 'RET'; }
 "sal-de-instrucción"                        { return 'RET'; }
 "memoria"                                   { return 'MEMO'; }
-"="                                         { return 'ASSIGN'; }
+":="                                         { return 'ASSIGN'; }
 "como"                                      { return 'AS'; }
 "apagate"                                   { return 'HALT'; }
 "apágate"                                   { return 'HALT'; }

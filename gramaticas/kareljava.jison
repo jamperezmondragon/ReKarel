@@ -178,7 +178,7 @@ expr
   | RET '(' ')' ';'
     { $$ = [['LINE', yylineno], ['RET']]; }
   | MEMO '[' integer ']' ASSIGN integer ';'
-    { $$ = [['LINE', yylineno] ].concat($3).concat($5).concat([['MEMORIZE']]); }
+    { $$ = [['LINE', yylineno] ].concat($3).concat($6).concat([['MEMORIZE']]); }
   | call ';'
     { $$ = $call; }
   | cond
