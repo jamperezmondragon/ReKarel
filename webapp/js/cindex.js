@@ -20664,13 +20664,22 @@
         GetWorldColCount() {
             return this.world.w;
         }
-        DrawVerticalGutter() {
+        DrawVerticalGutter(selection = null) {
             let h = this.GetHeight();
             this.GetWidth();
             this.canvasContext.fillStyle = this.style.gutterBackgroundColor;
             this.canvasContext.fillRect(0, 0, this.GutterSize, h - this.GutterSize);
             let rows = this.GetRowCount();
             this.canvasContext.strokeStyle = this.style.gridBorderColor;
+            let r1 = -1, r2 = -1;
+            if (selection != null) {
+                r1 = Math.min(selection.r, selection.r + (selection.rows - 1) * selection.dr) - this.origin.f;
+                r2 = Math.max(selection.r, selection.r + (selection.rows - 1) * selection.dr) - this.origin.f;
+                let sr1 = h - (this.GutterSize + (r1) * this.CellSize);
+                let sr2 = h - (this.GutterSize + (r2 + 1) * this.CellSize);
+                this.canvasContext.fillStyle = this.style.gutterSelectionBackgroundColor;
+                this.canvasContext.fillRect(0, sr2, this.GutterSize, sr1 - sr2);
+            }
             this.canvasContext.beginPath();
             for (let i = 0; i < rows; i++) {
                 this.canvasContext.moveTo(0, h - (this.GutterSize + (i + 1) * this.CellSize) + 0.5);
@@ -20683,17 +20692,32 @@
             this.canvasContext.textBaseline = "middle";
             for (let i = 0; i < rows; i++) {
                 // this.canvasContext.measureText()
+                if (i < r1 || i > r2) {
+                    this.canvasContext.fillStyle = this.style.gutterColor;
+                }
+                else {
+                    this.canvasContext.fillStyle = this.style.gutterSelectionColor;
+                }
                 if (i + this.origin.f <= this.GetWorldRowCount())
                     this.DrawTextVerticallyAlign(`${i + this.origin.f}`, this.GutterSize / 2, h - (this.GutterSize + (i + 0.5) * this.CellSize), this.GutterSize - this.margin);
             }
         }
-        DrawHorizontalGutter() {
+        DrawHorizontalGutter(selection = null) {
             let h = this.GetHeight();
             let w = this.GetWidth();
             this.canvasContext.fillStyle = this.style.gutterBackgroundColor;
             this.canvasContext.fillRect(this.GutterSize, h - this.GutterSize, w, h);
             let cols = this.GetColCount();
             this.canvasContext.strokeStyle = this.style.gridBorderColor;
+            let c1 = -1, c2 = -1;
+            if (selection != null) {
+                c1 = Math.min(selection.c, selection.c + (selection.cols - 1) * selection.dc) - this.origin.c;
+                c2 = Math.max(selection.c, selection.c + (selection.cols - 1) * selection.dc) - this.origin.c;
+                let sc1 = (this.GutterSize + (c1) * this.CellSize);
+                let sc2 = (this.GutterSize + (c2 + 1) * this.CellSize);
+                this.canvasContext.fillStyle = this.style.gutterSelectionBackgroundColor;
+                this.canvasContext.fillRect(sc1, h - this.GutterSize, sc2 - sc1, this.GutterSize + 1);
+            }
             this.canvasContext.beginPath();
             for (let i = 0; i < cols; i++) {
                 this.canvasContext.moveTo(this.GutterSize + (i + 1) * this.CellSize - 0.5, h);
@@ -20705,18 +20729,25 @@
             this.canvasContext.textAlign = "center";
             this.canvasContext.textBaseline = "middle";
             for (let i = 0; i < cols; i++) {
+                if (i < c1 || i > c2) {
+                    this.canvasContext.fillStyle = this.style.gutterColor;
+                }
+                else {
+                    this.canvasContext.fillStyle = this.style.gutterSelectionColor;
+                }
                 // this.canvasContext.measureText()            
                 if (i + this.origin.c <= this.GetWorldColCount())
                     this.DrawTextVerticallyAlign(`${i + this.origin.c}`, this.GutterSize + i * this.CellSize + 0.5 * this.CellSize, h - this.GutterSize / 2, this.CellSize - this.margin);
             }
         }
-        DrawGutters() {
+        DrawGutters(selection = null) {
             let h = this.GetHeight();
             this.GetWidth();
             this.canvasContext.fillStyle = this.style.gridBorderColor;
             this.canvasContext.fillRect(0, h - this.GutterSize, this.GutterSize, this.GutterSize);
-            this.DrawVerticalGutter();
-            this.DrawHorizontalGutter();
+            this.DrawVerticalGutter(selection);
+            this.DrawHorizontalGutter(selection);
+            this.DrawGutterWalls();
         }
         DrawGrid() {
             let h = this.GetHeight();
@@ -20856,6 +20887,20 @@
             this.canvasContext.lineWidth = lineOr;
             this.ResetTransform();
         }
+        DrawGutterWalls() {
+            for (let i = 0; i < this.GetRowCount(); i++) {
+                let walls = this.world.walls(i + this.origin.f, this.origin.c);
+                if ((walls & (1 << 0)) !== 0) {
+                    this.DrawWall(i, 0, "west");
+                }
+            }
+            for (let j = 0; j < this.GetColCount(); j++) {
+                let walls = this.world.walls(this.origin.f, j + this.origin.c);
+                if ((walls & (1 << 3)) !== 0) {
+                    this.DrawWall(0, j, "south");
+                }
+            }
+        }
         DrawWalls() {
             for (let i = 0; i < this.GetRowCount(); i++) {
                 for (let j = 0; j < this.GetColCount(); j++) {
@@ -20893,13 +20938,13 @@
                 }
             }
         }
-        Draw(world) {
+        Draw(world, selection = null) {
             this.world = world;
             this.ResetTransform();
             let h = this.GetHeight();
             let w = this.GetWidth();
             this.canvasContext.clearRect(0, 0, w, h);
-            this.DrawGutters();
+            this.DrawGutters(selection);
             this.DrawBackground();
             this.DrawDumpCells();
             this.DrawGrid();
@@ -24291,6 +24336,15 @@
         INSTRUCTION: 'Karel ha superado el límite de instrucciones!',
         STACK: 'La pila de karel se ha desbordado!',
     };
+    function decodeRuntimeError(error, maxInstructions, stackSize) {
+        if (error === "INSTRUCTION") {
+            return `Karel ha superado el límite de ${maxInstructions.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} instrucciones!`;
+        }
+        if (error === "STACK") {
+            return `La pila de karel se ha desbordado! El tamaño de la pila es de ${stackSize.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+        }
+        return ERRORCODES[error];
+    }
 
     class KarelController {
         constructor(world, mainEditor) {
@@ -24370,6 +24424,7 @@
             this.Reset();
             let runtime = this.GetRuntime();
             runtime.load(compiled);
+            runtime.disableStackEvents = false;
             // FIXME: We skip validators, they seem useless, but I'm unsure
             runtime.start();
             this.running = true;
@@ -24419,32 +24474,37 @@
             }
         }
         Step() {
-            if (this.state === "finished") {
-                //Ignore if the code already finished running
+            if (!this.StartStep())
                 return;
-            }
-            if (!this.running) {
-                if (!this.StartRun()) {
-                    // Code Failed
-                    return;
-                }
-            }
             let runtime = this.GetRuntime();
             runtime.step();
-            this.HighlightCurrentLine();
-            // TODO: Move this to notify step!
-            // this.desktopController.TrackFocusToKarel();
-            // this.desktopController.CheckUpdate();
-            if (!runtime.state.running) {
-                this.EndMessage();
-                this.ChangeState("finished");
+            this.EndStep();
+        }
+        StepOver() {
+            if (!this.StartStep())
+                return;
+            const runtime = this.GetRuntime();
+            const startWStackSize = runtime.state.stackSize;
+            runtime.step();
+            if (runtime.state.stackSize > startWStackSize) {
+                while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize)
+                    ;
+                runtime.step();
             }
-            if (this.CheckForBreakPointOnCurrentLine()) {
-                this.Pause();
-                this.NotifyStep();
+            this.EndStep();
+        }
+        StepOut() {
+            if (!this.StartStep())
+                return;
+            const runtime = this.GetRuntime();
+            const startWStackSize = runtime.state.stackSize;
+            if (startWStackSize === 0) {
+                this.RunTillEnd();
                 return;
             }
-            this.NotifyStep();
+            while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize)
+                ;
+            this.EndStep();
         }
         StartAutoStep(delay) {
             this.StopAutoStep(); //Avoid thread leak
@@ -24495,10 +24555,10 @@
                 }
             }
             let runtime = this.GetRuntime();
-            runtime.disableStackEvents = true; // FIXME: This should only be done when no breakpoints
-            while (runtime.step() && (ignoreBreakpoints || !this.CheckForBreakPointOnCurrentLine()))
+            // runtime.disableStackEvents= false; // FIXME: This should only be done when no breakpoints
+            // runtime.disableStackEvents= true; // FIXME: This should only be done when no breakpoints
+            while (this.PerformAutoStep(ignoreBreakpoints))
                 ;
-            runtime.disableStackEvents = false; // FIXME: This should only be done when no breakpoints
             // this.desktopController.CheckUpdate();
             this.HighlightCurrentLine();
             if (!runtime.state.running) {
@@ -24545,6 +24605,41 @@
             this.world.load(world);
             this.NotifyNewWorld(false);
         }
+        StartStep() {
+            if (this.state === "finished") {
+                //Ignore if the code already finished running
+                return false;
+            }
+            if (!this.running) {
+                if (!this.StartRun()) {
+                    // Code Failed
+                    return false;
+                }
+            }
+            return true;
+        }
+        EndStep() {
+            this.HighlightCurrentLine();
+            if (!this.GetRuntime().state.running) {
+                this.EndMessage();
+                this.ChangeState("finished");
+            }
+            if (this.CheckForBreakPointOnCurrentLine()) {
+                this.Pause();
+                this.NotifyStep();
+                return;
+            }
+            this.NotifyStep();
+        }
+        PerformAutoStep(ignoreBreakpoints = false) {
+            const runtime = this.GetRuntime();
+            const result = runtime.step();
+            if (runtime.state.ic >= 200000 && !runtime.disableStackEvents) {
+                runtime.disableStackEvents = true;
+                this.SendMessage("Karel alcanzó las 200,000 instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse", "warning");
+            }
+            return result && (ignoreBreakpoints || !this.CheckForBreakPointOnCurrentLine());
+        }
         SendMessage(message, type) {
             this.onMessage.forEach((callback) => callback(message, type));
         }
@@ -24570,7 +24665,7 @@
         EndMessage() {
             let state = this.GetRuntime().state;
             if (state.error) {
-                this.SendMessage(ERRORCODES[state.error], "error");
+                this.SendMessage(decodeRuntimeError(state.error, this.world.maxInstructions, this.world.maxStackSize), "error");
                 this.endedOnError = true;
                 return;
             }
@@ -24707,12 +24802,30 @@
         if (status == null) {
             return "Error de compilación";
         }
-        let message = `Error de compilación en la línea ${status.line + 1}`;
+        let message = `Error de compilación en la línea ${status.line + 1}\n<br>\n<div class="card"><div class="card-body">`;
         if (status.expected) {
-            message += "\n<br>\n";
             let expectations = status.expected.map((x => ERROR_TOKENS[lan][x.replace(/^'+/, "").replace(/'+$/, "")]));
             message += `Se encontró "${status.text}" cuando se esperaba ${expectations.join(", ")}`;
         }
+        else {
+            let errorString = `${e}`;
+            if (errorString.includes("Undefined function")) {
+                message += `La función <b>${status.text}</b> no esta definida`;
+            }
+            else if (errorString.includes("Unrecognized text")) {
+                message += `Se encontro un token ilegal`;
+            }
+            else if (errorString.includes("Function redefinition")) {
+                message += `La función <b>${status.text}</b> ya fue definida previamente`;
+            }
+            else if (errorString.includes("Prototype redefinition")) {
+                message += `El prototipo <b>${status.text}</b> ya fue definido previamente`;
+            }
+            else {
+                message += "Error desconocido";
+            }
+        }
+        message += "</div></div>";
         return message;
     }
 
@@ -24793,6 +24906,7 @@
             this.state = {
                 cursorX: 0,
                 cursorY: 0,
+                cellPair: { r: 0, c: 0 }
             };
             this.gizmos = gizmos;
             this.scale = 1;
@@ -24842,6 +24956,7 @@
                 dc: c <= c2 ? 1 : -1,
                 state: state
             };
+            this.UpdateGutter();
             this.UpdateWaffle();
         }
         GetCoords2() {
@@ -24907,8 +25022,9 @@
             let y = (e.clientY - boundingBox.top) * canvas.height / boundingBox.height;
             this.state.cursorX = x / this.renderer.scale;
             this.state.cursorY = y / this.renderer.scale;
+            this.state.cellPair = this.renderer.PointToCell(this.state.cursorX, this.state.cursorY);
             if (this.selection.state === "selecting") {
-                let cell = this.renderer.PointToCell(this.state.cursorX, this.state.cursorY);
+                let cell = this.state.cellPair;
                 this.ExtendSelection(cell.r, cell.c, "selecting");
             }
         }
@@ -25180,7 +25296,10 @@
         }
         Update() {
             this.karelController.world.dirty = false;
-            this.renderer.Draw(this.karelController.world);
+            this.renderer.Draw(this.karelController.world, this.selection);
+        }
+        UpdateGutter() {
+            this.renderer.DrawGutters(this.selection);
         }
         UpdateScrollElements() {
             let c = this.renderer.CellSize;
@@ -25375,6 +25494,8 @@
         beeperColor: "#000000",
         wallColor: "#000000",
         waffleColor: "#0d6dfd",
+        gutterSelectionBackgroundColor: "#86afd5",
+        gutterSelectionColor: "#000000",
     };
     const WR_CLEAN = {
         disabled: '#4f4f4f',
@@ -25390,6 +25511,8 @@
         beeperColor: "#000000",
         wallColor: "#000000",
         waffleColor: "#0d6dfd",
+        gutterSelectionBackgroundColor: "#86afd5",
+        gutterSelectionColor: "#000000",
     };
     const WR_DARK = {
         disabled: '#4f4f4f',
@@ -25404,7 +25527,9 @@
         beeperBackgroundColor: "#005608",
         beeperColor: "#ffffff",
         wallColor: "#f1f1f1",
-        waffleColor: "#82e8ff"
+        waffleColor: "#82e8ff",
+        gutterSelectionBackgroundColor: "#352f7f",
+        gutterSelectionColor: "#FCFCFC",
     };
     const WR_CONTRAST = {
         disabled: '#4f4f4f',
@@ -25420,7 +25545,188 @@
         beeperColor: "#ffffff",
         wallColor: "#000000",
         waffleColor: "#ff0000",
+        gutterSelectionBackgroundColor: "#000000",
+        gutterSelectionColor: "#ffffff",
     };
+
+    class ControlBar {
+        constructor(ui, worldController) {
+            this.ui = ui;
+            this.worldController = worldController;
+            this.isControlInPlayMode = false;
+        }
+        Init() {
+            KarelController.GetInstance().RegisterStateChangeObserver(this.OnKarelControllerStateChange.bind(this));
+            this.ConnectExecutionButtonGroup();
+        }
+        ConnectExecutionButtonGroup() {
+            const exec = this.ui.execution;
+            const controller = KarelController.GetInstance();
+            exec.compile.on("click", () => controller.Compile());
+            exec.reset.on("click", () => this.ResetExecution());
+            exec.step.on("click", () => this.Step());
+            exec.stepOver.on("click", () => this.StepOver());
+            exec.stepOut.on("click", () => this.StepOut());
+            exec.future.on("click", () => this.RunTillEnd());
+            exec.run.on("click", () => {
+                if (!this.isControlInPlayMode) {
+                    this.AutoStep();
+                }
+                else {
+                    this.PauseStep();
+                }
+            });
+            this.ui.delayInput.on("change", () => {
+                let delay = parseInt(this.ui.delayInput.val());
+                KarelController.GetInstance().ChangeAutoStepDelay(delay);
+            });
+            this.ui.delayAdd.on("click", () => {
+                let delay = parseInt(this.ui.delayInput.val());
+                delay += 50;
+                this.ui.delayInput.val(delay);
+                this.ui.delayInput.trigger("change");
+            });
+            this.ui.delayRemove.on("click", () => {
+                let delay = parseInt(this.ui.delayInput.val());
+                delay -= 50;
+                delay = delay < 0 ? 0 : delay;
+                this.ui.delayInput.val(delay);
+                this.ui.delayInput.trigger("change");
+            });
+            this.ui.beeperInput.on("change", () => this.OnBeeperInputChange());
+            this.ui.infiniteBeeperInput.on("click", () => this.ToggleInfiniteBeepers());
+            KarelController.GetInstance().RegisterStepController((_ctr, _state) => { this.UpdateBeeperBag(); });
+            KarelController.GetInstance().RegisterNewWorldObserver((_ctr, _state, _newInstance) => { this.UpdateBeeperBag(); });
+        }
+        AutoStep() {
+            let delay = parseInt(this.ui.delayInput.val());
+            KarelController.GetInstance().StartAutoStep(delay);
+            this.SetPlayMode();
+        }
+        PauseStep() {
+            KarelController.GetInstance().Pause();
+        }
+        RunTillEnd() {
+            KarelController.GetInstance().RunTillEnd();
+            this.UpdateBeeperBag();
+        }
+        ResetExecution() {
+            KarelController.GetInstance().Reset();
+            this.UpdateBeeperBag();
+        }
+        Step() {
+            KarelController.GetInstance().Step();
+            this.UpdateBeeperBag();
+        }
+        StepOver() {
+            KarelController.GetInstance().StepOver();
+            this.UpdateBeeperBag();
+        }
+        StepOut() {
+            KarelController.GetInstance().StepOut();
+            this.UpdateBeeperBag();
+        }
+        OnBeeperInputChange() {
+            if (KarelController.GetInstance().GetState() !== "unstarted") {
+                return;
+            }
+            let beeperAmmount = parseInt(this.ui.beeperInput.val());
+            this.worldController.SetBeepersInBag(beeperAmmount);
+        }
+        ToggleInfiniteBeepers() {
+            if (this.worldController.GetBeepersInBag() !== -1) {
+                this.ActivateInfiniteBeepers();
+                this.worldController.SetBeepersInBag(-1);
+            }
+            else {
+                this.DeactivateInfiniteBeepers();
+                this.worldController.SetBeepersInBag(0);
+                this.UpdateBeeperBag();
+            }
+        }
+        UpdateBeeperBag() {
+            const amount = this.worldController.GetBeepersInBag();
+            this.ui.beeperInput.val(amount);
+            if (amount === -1) {
+                this.ActivateInfiniteBeepers();
+            }
+            else {
+                this.DeactivateInfiniteBeepers();
+            }
+        }
+        ActivateInfiniteBeepers() {
+            this.ui.beeperInput.hide();
+            this.ui.infiniteBeeperInput.removeClass("btn-body");
+            this.ui.infiniteBeeperInput.addClass("btn-info");
+        }
+        DeactivateInfiniteBeepers() {
+            this.ui.beeperInput.show();
+            this.ui.infiniteBeeperInput.removeClass("btn-info");
+            this.ui.infiniteBeeperInput.addClass("btn-body");
+        }
+        SetPlayMode() {
+            this.isControlInPlayMode = true;
+            this.ui.execution.compile.attr("disabled", "");
+            this.ui.execution.step.attr("disabled", "");
+            this.ui.execution.stepOver.attr("disabled", "");
+            this.ui.execution.stepOut.attr("disabled", "");
+            this.ui.execution.future.attr("disabled", "");
+            this.ui.beeperInput.attr("disabled", "");
+            this.ui.infiniteBeeperInput.attr("disabled", "");
+            this.ui.execution.run.html('<i class="bi bi-pause-fill"></i>');
+        }
+        SetPauseMode() {
+            this.isControlInPlayMode = false;
+            this.ui.execution.compile.attr("disabled", "");
+            this.ui.beeperInput.attr("disabled", "");
+            this.ui.infiniteBeeperInput.attr("disabled", "");
+            this.ui.execution.step.removeAttr("disabled");
+            this.ui.execution.stepOver.removeAttr("disabled");
+            this.ui.execution.stepOut.removeAttr("disabled");
+            this.ui.execution.future.removeAttr("disabled");
+            this.ui.execution.run.removeAttr("disabled");
+            this.ui.execution.run.html('<i class="bi bi-play-fill"></i>');
+        }
+        DisableControlBar() {
+            this.ui.execution.compile.attr("disabled", "");
+            this.ui.execution.run.attr("disabled", "");
+            this.ui.execution.step.attr("disabled", "");
+            this.ui.execution.stepOver.attr("disabled", "");
+            this.ui.execution.stepOut.attr("disabled", "");
+            this.ui.execution.future.attr("disabled", "");
+            this.ui.beeperInput.attr("disabled", "");
+            this.ui.infiniteBeeperInput.attr("disabled", "");
+        }
+        EnableControlBar() {
+            this.ui.execution.compile.removeAttr("disabled");
+            this.ui.execution.run.removeAttr("disabled");
+            this.ui.execution.step.removeAttr("disabled");
+            this.ui.execution.stepOver.removeAttr("disabled");
+            this.ui.execution.stepOut.removeAttr("disabled");
+            this.ui.execution.future.removeAttr("disabled");
+            this.ui.beeperInput.removeAttr("disabled");
+            this.ui.infiniteBeeperInput.removeAttr("disabled");
+            this.ui.execution.run.html('<i class="bi bi-play-fill"></i>');
+        }
+        OnKarelControllerStateChange(sender, state) {
+            if (state === "running") {
+                this.SetPauseMode();
+            }
+            if (state === "finished") {
+                this.isControlInPlayMode = false;
+                this.DisableControlBar();
+            }
+            else if (state === "unstarted") {
+                this.isControlInPlayMode = false;
+                this.EnableControlBar();
+                this.worldController.NormalMode();
+                this.UpdateBeeperBag();
+            }
+            else if (state === "paused") {
+                this.SetPauseMode();
+            }
+        }
+    }
 
     class DesktopController {
         constructor(elements, karelController) {
@@ -25430,11 +25736,6 @@
             this.worldZoom = elements.worldZoom;
             this.lessZoom = elements.lessZoom;
             this.moreZoom = elements.moreZoom;
-            this.executionReset = elements.controlBar.execution.reset;
-            this.executionCompile = elements.controlBar.execution.compile;
-            this.executionRun = elements.controlBar.execution.run;
-            this.executionStep = elements.controlBar.execution.step;
-            this.executionEnd = elements.controlBar.execution.future;
             this.beeperBagInput = elements.controlBar.beeperInput;
             this.infiniteBeeperInput = elements.controlBar.infiniteBeeperInput;
             this.delayInput = elements.controlBar.delayInput;
@@ -25445,11 +25746,6 @@
             this.wallToolbar = elements.toolbar.wall;
             this.evaluateToolbar = elements.toolbar.evaluate;
             this.focusToolbar = elements.toolbar.focus;
-            // this.contextToggler = elements.context.toggler;
-            // this.contextContainer = elements.context.container;
-            // this.contextBeepers = elements.context.beepers;
-            // this.contextKarel = elements.context.karel;        
-            // this.contextWall = elements.context.wall;
             this.console = new KarelConsole(elements.console);
             this.karelController = karelController;
             this.worldController = new WorldViewController(new WorldRenderer(this.worldCanvas[0].getContext("2d"), DefaultWRStyle, 1), karelController, elements.worldContainer[0], elements.gizmos);
@@ -25457,6 +25753,7 @@
             this.karelController.RegisterStateChangeObserver(this.OnKarelControllerStateChange.bind(this));
             this.isControlInPlayMode = false;
             this.callStack = new CallStack(elements.callStack);
+            this.controlbar = new ControlBar(elements.controlBar, this.worldController);
         }
         Init() {
             $(window).on("resize", this.ResizeCanvas.bind(this));
@@ -25485,150 +25782,18 @@
                     nzoom = zooms.length - 1;
                 this.worldZoom.val(zooms[nzoom]).trigger('change');
             });
-            this.ConnectExecutionButtonGroup();
+            this.controlbar.Init();
             this.ConnectToolbar();
             this.ResizeCanvas();
             this.worldController.FocusOrigin();
             this.ConnectConsole();
         }
-        ConnectExecutionButtonGroup() {
-            this.executionCompile.on("click", () => this.karelController.Compile());
-            this.executionReset.on("click", () => this.ResetExecution());
-            this.executionStep.on("click", () => this.Step());
-            this.executionEnd.on("click", () => this.RunTillEnd());
-            this.executionRun.on("click", () => {
-                if (!this.isControlInPlayMode) {
-                    this.AutoStep();
-                }
-                else {
-                    this.PauseStep();
-                }
-            });
-            this.delayInput.on("change", () => {
-                let delay = parseInt(this.delayInput.val());
-                this.karelController.ChangeAutoStepDelay(delay);
-            });
-            this.delayAdd.on("click", () => {
-                let delay = parseInt(this.delayInput.val());
-                delay += 50;
-                this.delayInput.val(delay);
-                this.karelController.ChangeAutoStepDelay(delay);
-            });
-            this.delayRemove.on("click", () => {
-                let delay = parseInt(this.delayInput.val());
-                delay -= 50;
-                delay = delay < 0 ? 0 : delay;
-                this.delayInput.val(delay);
-                this.karelController.ChangeAutoStepDelay(delay);
-            });
-            this.beeperBagInput.on("change", () => this.OnBeeperInputChange());
-            this.infiniteBeeperInput.on("click", () => this.ToggleInfiniteBeepers());
-            this.karelController.RegisterStepController((_ctr, _state) => { this.UpdateBeeperBag(); });
-            this.karelController.RegisterNewWorldObserver((_ctr, _state, _newInstance) => { this.UpdateBeeperBag(); });
-        }
-        UpdateBeeperBag() {
-            const amount = this.worldController.GetBeepersInBag();
-            this.beeperBagInput.val(amount);
-            if (amount === -1) {
-                this.ActivateInfiniteBeepers();
-            }
-            else {
-                this.DeactivateInfiniteBeepers();
-            }
-        }
-        ActivateInfiniteBeepers() {
-            this.beeperBagInput.hide();
-            this.infiniteBeeperInput.removeClass("btn-body");
-            this.infiniteBeeperInput.addClass("btn-info");
-        }
-        DeactivateInfiniteBeepers() {
-            this.beeperBagInput.show();
-            this.infiniteBeeperInput.removeClass("btn-info");
-            this.infiniteBeeperInput.addClass("btn-body");
-        }
-        ToggleInfiniteBeepers() {
-            if (this.worldController.GetBeepersInBag() !== -1) {
-                this.ActivateInfiniteBeepers();
-                this.worldController.SetBeepersInBag(-1);
-            }
-            else {
-                this.DeactivateInfiniteBeepers();
-                this.worldController.SetBeepersInBag(0);
-                this.UpdateBeeperBag();
-            }
-        }
-        OnBeeperInputChange() {
-            if (this.karelController.GetState() !== "unstarted") {
-                return;
-            }
-            let beeperAmmount = parseInt(this.beeperBagInput.val());
-            this.worldController.SetBeepersInBag(beeperAmmount);
-        }
-        ResetExecution() {
-            this.karelController.Reset();
-            this.UpdateBeeperBag();
-        }
-        AutoStep() {
-            let delay = parseInt(this.delayInput.val());
-            this.karelController.StartAutoStep(delay);
-            this.SetPlayMode();
-        }
-        PauseStep() {
-            this.karelController.Pause();
-        }
-        RunTillEnd() {
-            this.karelController.RunTillEnd();
-            this.UpdateBeeperBag();
-        }
-        Step() {
-            this.karelController.Step();
-            this.UpdateBeeperBag();
-        }
-        DisableControlBar() {
-            this.executionCompile.attr("disabled", "");
-            this.executionRun.attr("disabled", "");
-            this.executionStep.attr("disabled", "");
-            this.executionEnd.attr("disabled", "");
-            this.beeperBagInput.attr("disabled", "");
-            this.infiniteBeeperInput.attr("disabled", "");
-        }
-        EnableControlBar() {
-            this.executionCompile.removeAttr("disabled");
-            this.executionRun.removeAttr("disabled");
-            this.executionStep.removeAttr("disabled");
-            this.executionEnd.removeAttr("disabled");
-            this.beeperBagInput.removeAttr("disabled");
-            this.infiniteBeeperInput.removeAttr("disabled");
-            this.executionRun.html('<i class="bi bi-play-fill"></i>');
-        }
-        SetPlayMode() {
-            this.isControlInPlayMode = true;
-            this.executionCompile.attr("disabled", "");
-            this.executionStep.attr("disabled", "");
-            this.executionEnd.attr("disabled", "");
-            this.beeperBagInput.attr("disabled", "");
-            this.infiniteBeeperInput.attr("disabled", "");
-            this.executionRun.html('<i class="bi bi-pause-fill"></i>');
-        }
-        SetPauseMode() {
-            this.isControlInPlayMode = false;
-            this.executionCompile.attr("disabled", "");
-            this.beeperBagInput.attr("disabled", "");
-            this.infiniteBeeperInput.attr("disabled", "");
-            this.executionStep.removeAttr("disabled");
-            this.executionEnd.removeAttr("disabled");
-            this.executionRun.removeAttr("disabled");
-            this.executionRun.html('<i class="bi bi-play-fill"></i>');
-        }
         OnKarelControllerStateChange(sender, state) {
             if (state === "running") {
                 freezeEditors(this.editor);
-                this.SetPauseMode();
                 this.worldController.Lock();
             }
             if (state === "finished") {
-                this.isControlInPlayMode = false;
-                this.DisableControlBar();
                 if (this.karelController.EndedOnError()) {
                     this.worldController.ErrorMode();
                 }
@@ -25636,15 +25801,9 @@
                 this.worldController.Lock();
             }
             else if (state === "unstarted") {
-                this.isControlInPlayMode = false;
-                this.EnableControlBar();
                 unfreezeEditors(this.editor);
                 this.worldController.UnLock();
                 this.worldController.NormalMode();
-                this.UpdateBeeperBag();
-            }
-            else if (state === "paused") {
-                this.SetPauseMode();
             }
         }
         ConnectToolbar() {
@@ -25681,6 +25840,9 @@
                     break;
                 case "error":
                     style = "danger";
+                    break;
+                case "warning":
+                    style = "warning";
                     break;
                 case "raw":
                     style = "raw";
@@ -25949,6 +26111,7 @@
     function HookWorldSaveModal(modal, karelController) {
         $(modal.inputBtn).on("click", () => setInputWorld(modal, karelController));
         $(modal.outputBtn).on("click", () => setOutputWorld(modal, karelController));
+        $(modal.inputField).on("change", () => { setFileNameLink(modal); });
     }
 
     function getCode(editor) {
@@ -26270,7 +26433,7 @@
     }
 
     const APP_SETTING = 'appSettings';
-    const SETTINGS_VERSION = "0.4.0";
+    const SETTINGS_VERSION = "0.5.0";
     let appSettings = {
         version: SETTINGS_VERSION,
         interface: "desktop",
@@ -26356,8 +26519,10 @@
             const memorySettings = JSON.parse(jsonString);
             if (memorySettings.version == null)
                 return;
-            if (memorySettings.version !== SETTINGS_VERSION)
+            if (memorySettings.version !== SETTINGS_VERSION) {
+                localStorage.removeItem(memorySettings);
                 return;
+            }
             appSettings = memorySettings;
         }
     }
@@ -26424,6 +26589,8 @@
             beeperColor: $('#beeperColor').val(),
             wallColor: $('#wallColor').val(),
             waffleColor: $('#waffleColor').val(),
+            gutterSelectionBackgroundColor: $('#gutterSelectionBackgroundColor').val(),
+            gutterSelectionColor: $('#gutterSelectionColor').val(),
         };
     }
     function setFormData(style) {
@@ -26440,6 +26607,8 @@
         $('#beeperColor').val(style.beeperColor);
         $('#wallColor').val(style.wallColor);
         $('#waffleColor').val(style.waffleColor);
+        $('#gutterSelectionBackgroundColor').val(style.gutterSelectionBackgroundColor);
+        $('#gutterSelectionColor').val(style.gutterSelectionColor);
     }
     function loadPreset() {
         const val = $("#karelStylePreset").val();
@@ -26640,6 +26809,8 @@
                 compile: $("#desktopCompileKarel"),
                 run: $("#dekstopRunKarel"),
                 step: $("#desktopStepProgram"),
+                stepOut: $("#desktopStepOutProgram"),
+                stepOver: $("#desktopStepOverProgram"),
                 future: $("#desktopFutureProgram"),
             },
             beeperInput: $("#beeperBag"),

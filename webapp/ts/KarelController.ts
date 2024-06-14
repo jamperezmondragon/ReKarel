@@ -1,10 +1,10 @@
 import { World, compile, detectLanguage } from "../../js/karel";
 // import { WorldViewController } from "./worldViewController";
 import { EditorView } from "codemirror";
-import { ERRORCODES } from "./errorCodes";
+import { decodeRuntimeError } from "./errorCodes";
 import { breakpointState, setLanguage } from "./editor/editor";
 
-type messageType = "info"|"success"|"error"|"raw";
+type messageType = "info"|"success"|"error"|"raw"|"warning";
 type MessageCallback = (message:string, type:messageType)=>void;
 type ControllerState = "unstarted"| "running" | "finished" | "paused";
 type StateChangeCallback = (caller:KarelController, newState:ControllerState)=>void;
@@ -124,6 +124,7 @@ class KarelController {
         this.Reset();
         let runtime = this.GetRuntime();        
         runtime.load(compiled);
+        runtime.disableStackEvents = false;
         // FIXME: We skip validators, they seem useless, but I'm unsure
         
         runtime.start();
@@ -184,36 +185,37 @@ class KarelController {
       }
 
     Step() {
-        if (this.state === "finished") {
-            //Ignore if the code already finished running
-            return;
-        }
-        if (!this.running) {
-            if (!this.StartRun()) {
-                // Code Failed
-                return;
-            }
-        }
+        if (!this.StartStep()) return;
         
         let runtime = this.GetRuntime();
         runtime.step();
-        this.HighlightCurrentLine();
-        // TODO: Move this to notify step!
-        // this.desktopController.TrackFocusToKarel();
-        // this.desktopController.CheckUpdate();
+        this.EndStep();
+    }
 
-        if (!runtime.state.running) {            
-            this.EndMessage();
-            this.ChangeState("finished");
+    StepOver() {
+        if (!this.StartStep()) return;
+        
+        const runtime = this.GetRuntime();
+        const startWStackSize = runtime.state.stackSize;
+        runtime.step();
+        if (runtime.state.stackSize > startWStackSize) {
+            while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize);
+            runtime.step();
         }
-        if (this.CheckForBreakPointOnCurrentLine()) {
-            this.Pause();
-            this.NotifyStep();
+        this.EndStep();
+    }
+
+    StepOut() {
+        if (!this.StartStep()) return;
+        
+        const runtime = this.GetRuntime();
+        const startWStackSize = runtime.state.stackSize;
+        if (startWStackSize === 0) {
+            this.RunTillEnd();
             return;
         }
-
-        this.NotifyStep();
-
+        while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize);
+        this.EndStep();
     }
 
     StartAutoStep(delay:number) {        
@@ -273,9 +275,10 @@ class KarelController {
         }
 
         let runtime = this.GetRuntime();
-        runtime.disableStackEvents= true; // FIXME: This should only be done when no breakpoints
-        while ( runtime.step() && (ignoreBreakpoints || !this.CheckForBreakPointOnCurrentLine()));
-        runtime.disableStackEvents= false; // FIXME: This should only be done when no breakpoints
+        // runtime.disableStackEvents= false; // FIXME: This should only be done when no breakpoints
+        // runtime.disableStackEvents= true; // FIXME: This should only be done when no breakpoints
+        while (this.PerformAutoStep(ignoreBreakpoints));
+        
 
         // this.desktopController.CheckUpdate();
         
@@ -335,6 +338,49 @@ class KarelController {
         this.NotifyNewWorld(false);
     }
 
+    private StartStep() {
+        if (this.state === "finished") {
+            //Ignore if the code already finished running
+            return false;
+        }
+        if (!this.running) {
+            if (!this.StartRun()) {
+                // Code Failed
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private EndStep() {
+        this.HighlightCurrentLine();
+        
+        if (!this.GetRuntime().state.running) {            
+            this.EndMessage();
+            this.ChangeState("finished");
+        }
+        if (this.CheckForBreakPointOnCurrentLine()) {
+            this.Pause();
+            this.NotifyStep();
+            return;
+        }
+
+        this.NotifyStep();
+    }
+
+    private PerformAutoStep(ignoreBreakpoints:boolean = false) {
+        const runtime = this.GetRuntime();
+        const result = runtime.step();
+        
+        if (runtime.state.ic >= 200000 && !runtime.disableStackEvents) {
+            runtime.disableStackEvents = true;
+            this.SendMessage("Karel alcanzó las 200,000 instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse", "warning");
+        }
+        
+        
+        return result && (ignoreBreakpoints || !this.CheckForBreakPointOnCurrentLine());
+    }
+
     private SendMessage(message: string, type: messageType) {
         this.onMessage.forEach((callback) => callback(message, type));
     }
@@ -367,7 +413,7 @@ class KarelController {
     private EndMessage() {
         let state = this.GetRuntime().state;
         if (state.error) {
-            this.SendMessage(ERRORCODES[state.error], "error");            
+            this.SendMessage(decodeRuntimeError(state.error, this.world.maxInstructions, this.world.maxStackSize), "error");            
             this.endedOnError = true;
             return;
         }
@@ -392,6 +438,8 @@ class KarelController {
             )
         }
     }
+
+
 
     private BreakPointMessage(line:number) {
         this.SendMessage(`🔴 ${line}) Breakpoint `, "info");
@@ -513,12 +561,25 @@ function decodeError(e, lan : "java"|"pascal"|"ruby"|"none") : string {
     if (status == null) {
         return "Error de compilación";
     }
-    let message = `Error de compilación en la línea ${status.line +1}`
-    if (status.expected) {
-        message += "\n<br>\n"
+    let message = `Error de compilación en la línea ${status.line +1}\n<br>\n<div class="card"><div class="card-body">`
+    if (status.expected) {        
         let expectations = status.expected.map((x=>ERROR_TOKENS[lan][x.replace(/^'+/,"").replace(/'+$/,"") ]))        
         message += `Se encontró "${status.text}" cuando se esperaba ${ expectations.join(", ")}`
+    } else {
+        let errorString = `${e}`;
+        if (errorString.includes("Undefined function")) {
+            message += `La función <b>${status.text}</b> no esta definida`;
+        } else if (errorString.includes("Unrecognized text")) {
+            message += `Se encontro un token ilegal`;
+        } else if (errorString.includes("Function redefinition")) {
+            message += `La función <b>${status.text}</b> ya fue definida previamente`;
+        } else if (errorString.includes("Prototype redefinition")) {
+            message += `El prototipo <b>${status.text}</b> ya fue definido previamente`;
+        } else {
+            message += "Error desconocido"
+        }
     }
+    message+="</div></div>"
     return message;
 }
 
