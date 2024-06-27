@@ -1,5 +1,5 @@
 import { splitPanels } from "./split";
-import { setLanguage, SetText } from "./editor/editor";
+import { SelectLine, setLanguage, SetText } from "./editor/editor";
 import { DesktopController } from "./desktop/desktop-ui";
 import { GetPhoneUIHelper } from "./phone-ui";
 import { HookUpCommonUI } from "./common-ui";
@@ -10,9 +10,13 @@ import { responsiveHack } from "./responsive-load";
 import { InitSettings, StartSettings } from "./settings";
 import { getEditors } from "./editor/editorsInstances";
 import { HookSession, RestoreSession } from "./session";
+import { RegisterHighlightListeners } from "./editor/editor.listeners";
 
 
+let KarelWorld: World = new World(100, 100);
+let karelController = new KarelController(KarelWorld);
 var [desktopEditor, phoneEditor] = getEditors();
+RegisterHighlightListeners()
 //TODO: ThisShouldnt be here
 function hideElement(element: string) {
     $(element).addClass("d-none");
@@ -22,8 +26,6 @@ function showElement(element: string) {
 }
 
 
-let KarelWorld: World = new World(100, 100);
-let karelController = new KarelController(KarelWorld, desktopEditor);
 
 const pascalConfirm = {
     accept: () => {
@@ -275,6 +277,12 @@ HookUpCommonUI(
             countPicks:$("#countPicks"),
             countPuts:$("#countPuts"),
             countTurns:$("#countTurns"),
+            maxInstructions:$("#maxInstructions"),
+            maxStackSize:$("#maxStack"),
+            maxMove:$("#maxMove"),
+            maxTurnLeft:$("#maxTurnLeft"),
+            maxPickBuzzer:$("#maxPickBuzzer"),
+            maxLeaveBuzzer:$("#maxLeaveBuzzer"),
         },
         confirmModal: {
             modal: "#confirmModal",
@@ -343,3 +351,9 @@ $(document).ready(() => {
     StartSettings(DesktopUI);
     RestoreSession();
 })
+
+
+
+export function MoveEditorCursorToLine(line:number, column:number=0) {
+    SelectLine(desktopEditor, line, column);
+}

@@ -1,4 +1,4 @@
-(function (bootstrap) {
+var karel = (function (exports, bootstrap) {
     'use strict';
 
     // The programming goals of Split.js are to deliver readable, understandable and
@@ -781,6 +781,7 @@
         Split(['#splitter-left-top-pane', '#splitter-left-bottom-pane'], {
             sizes: [70, 30],
             direction: 'vertical',
+            minSize: 0,
         });
     }
 
@@ -20433,9 +20434,51 @@
         ]))
     };
 
-    let language = new Compartment, tabSize = new Compartment;
-    let theme = new Compartment;
-    let readOnly = new Compartment;
+    let highlightedLine = new Compartment;
+    const karelLineTheme = EditorView.baseTheme({
+        ".cm-karelLine.cm-activeLine": { backgroundColor: "rgba(255, 255, 0, 0.5)" },
+        ".cm-karelLine": { backgroundColor: "#22872a44" }, //TODO: Edit this based on the theme
+    });
+    const karelLineFacet = Facet.define({
+        combine: values => values.length ? Math.min(...values) : -1
+    });
+    function highlightKarelActiveLine() {
+        return [
+            karelLineTheme,
+            highlightedLine.of(karelLineFacet.of(-1)),
+            lineHighlighting
+        ];
+    }
+    const lineHighlight = Decoration.line({
+        attributes: { class: "cm-karelLine" }
+    });
+    function lineHighlightDeco(view) {
+        let pos = view.state.facet(karelLineFacet);
+        console.log(pos);
+        let builder = new RangeSetBuilder();
+        if (pos !== -1) {
+            let line = view.state.doc.line(pos);
+            builder.add(line.from, line.from, lineHighlight);
+        }
+        return builder.finish();
+    }
+    const lineHighlighting = ViewPlugin.fromClass(class {
+        constructor(view) {
+            this.decorations = lineHighlightDeco(view);
+        }
+        update(update) {
+            if (update.startState.facet(karelLineFacet) != update.state.facet(karelLineFacet))
+                this.decorations = lineHighlightDeco(update.view);
+        }
+    }, {
+        decorations: v => v.decorations
+    });
+    function HighlightKarelLine(editor, line) {
+        editor.dispatch({
+            effects: highlightedLine.reconfigure(karelLineFacet.of(line))
+        });
+    }
+
     const breakpointEffect = StateEffect.define({
         map: (val, mapping) => ({ pos: mapping.mapPos(val.pos), on: val.on })
     });
@@ -20487,6 +20530,21 @@
             }
         })
     ];
+    function CheckForBreakPointOnLine(editor, line) {
+        let codeLine = editor
+            .state
+            .doc
+            .line(line);
+        codeLine.from;
+        let breakpoints = editor.state.field(breakpointState);
+        let hasBreakpoint = false;
+        breakpoints.between(codeLine.from, codeLine.from, () => { hasBreakpoint = true; });
+        return hasBreakpoint;
+    }
+
+    let language = new Compartment, tabSize = new Compartment;
+    let theme = new Compartment;
+    let readOnly = new Compartment;
     function createEditors() {
         let startState = EditorState.create({
             doc: "iniciar-programa\n\tinicia-ejecucion\n\t\t{ TODO poner codigo aqui }\n\t\tapagate;\n\ttermina-ejecucion\nfinalizar-programa",
@@ -20495,6 +20553,7 @@
                 theme.of(classicHighlight.extensions),
                 syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
                 history(),
+                highlightKarelActiveLine(),
                 breakpointGutter,
                 drawSelection(),
                 lineNumbers(),
@@ -20590,6 +20649,20 @@
         }
         catch (_a) {
             console.log("ERROR loading extension");
+        }
+    }
+    function SelectLine(editor, line, column = 0, shouldFocus = true) {
+        const docLine = editor.state.doc.line(line);
+        const jumpTo = docLine.from + column;
+        editor.dispatch({
+            selection: {
+                anchor: jumpTo,
+                head: jumpTo
+            },
+            scrollIntoView: true
+        });
+        if (shouldFocus) {
+            editor.focus();
         }
     }
 
@@ -21095,9 +21168,17 @@
                         this.$ = $$[$0];
                         break;
                     case 6:
-                        this.$ = [[$$[$0 - 3], $$[$0 - 4].concat($$[$0]).concat([['RET']]), 1]];
+                        this._$.first_line = _$[$0 - 5].first_line;
+                        this._$.first_column = _$[$0 - 5].first_column;
+                        this._$.last_line = _$[$0 - 3].last_line;
+                        this._$.last_column = _$[$0 - 3].last_column;
+                        this.$ = [[$$[$0 - 3], $$[$0 - 4].concat($$[$0]).concat([['RET']]), 1, this._$]];
                         break;
                     case 7:
+                        this._$.first_line = _$[$0 - 6].first_line;
+                        this._$.first_column = _$[$0 - 6].first_column;
+                        this._$.last_line = _$[$0 - 4].last_line;
+                        this._$.last_column = _$[$0 - 4].last_column;
                         var result = $$[$0 - 5].concat($$[$0]).concat([['RET']]);
                         for (var i = 0; i < result.length; i++) {
                             if (result[i][0] == 'PARAM') {
@@ -21106,13 +21187,14 @@
                                 }
                                 else {
                                     yy.parser.parseError("Unknown variable: " + $$[$0 - 2], {
-                                        text: $$[$0 - 2],
-                                        line: yylineno
+                                        text: result[i][1],
+                                        line: yylineno,
+                                        loc: result[i][2]
                                     });
                                 }
                             }
                         }
-                        this.$ = [[$$[$0 - 4], result, 2]];
+                        this.$ = [[$$[$0 - 4], result, 2, this._$]];
                         break;
                     case 10:
                         this.$ = [['LINE', yylineno], ['WORLDWALLS'], ['ORIENTATION'], ['MASK'], ['AND'], ['NOT'], ['EZ', 'WALL'], ['FORWARD']];
@@ -21136,10 +21218,20 @@
                         this.$ = [['LINE', yylineno]].concat($$[$0 - 4]).concat($$[$0 - 1]).concat([['MEMORIZE']]);
                         break;
                     case 22:
-                        this.$ = [];
+                        var loc = {
+                            first_line: _$[$0 - 1].first_line,
+                            first_column: _$[$0 - 1].first_column,
+                            last_line: _$[$0].last_line,
+                            last_column: _$[$0].last_column,
+                        };
+                        this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0 - 2], 1, _$[$0 - 2], loc], ['LINE', yylineno]];
                         break;
                     case 23:
-                        this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0 - 2], 1], ['LINE', yylineno]];
+                        this._$.first_column = _$[$0 - 3].first_column;
+                        this._$.first_line = _$[$0 - 3].first_line;
+                        this._$.last_column = _$[$0].last_column;
+                        this._$.last_line = _$[$0].last_line;
+                        this.$ = [['LINE', yylineno]].concat($$[$0 - 1]).concat([['CALL', $$[$0 - 3], 2, _$[$0 - 3], _$[$0 - 1]], ['LINE', yylineno]]);
                         break;
                     case 24:
                         this.$ = [['LINE', yylineno]].concat($$[$0 - 1]).concat([['CALL', $$[$0 - 3], 2], ['LINE', yylineno]]);
@@ -21225,8 +21317,8 @@
                     case 56:
                         this.$ = [['ORIENTATION'], ['LOAD', 3], ['EQ'], ['NOT']];
                         break;
-                    case 57:
-                        this.$ = [['PARAM', $$[$0]]];
+                    case 56:
+                        this.$ = [['PARAM', $$[$0], _$[$0]]];
                         break;
                     case 58:
                         this.$ = [['LOAD', parseInt(yytext)]];
@@ -21324,7 +21416,7 @@
                             text: lexer.match,
                             token: this.terminals_[symbol] || symbol,
                             line: lexer.yylineno,
-                            loc: yyloc,
+                            loc: lexer.yylloc,
                             expected: expected
                         });
                     }
@@ -21396,7 +21488,8 @@
                 if (functions[function_list[i][0]]) {
                     yy.parser.parseError("Function redefinition: " + function_list[i][0], {
                         text: function_list[i][0],
-                        line: function_list[i][1][0][1]
+                        line: function_list[i][1][0][1],
+                        loc: function_list[i][3]
                     });
                 }
                 functions[function_list[i][0]] = program.length;
@@ -21412,23 +21505,35 @@
                     if (!functions[program[i][1]] || !prototypes[program[i][1]]) {
                         yy.parser.parseError("Undefined function: " + program[i][1], {
                             text: program[i][1],
-                            line: current_line
+                            line: current_line,
+                            loc: program[i][3]
                         });
                     }
                     else if (prototypes[program[i][1]] != program[i][2]) {
                         yy.parser.parseError("Function parameter mismatch: " + program[i][1], {
                             text: program[i][1],
-                            line: current_line
+                            line: current_line,
+                            loc: program[i][4],
+                            parameters: program[i][2],
                         });
                     }
                     program[i][2] = program[i][1];
                     program[i][1] = functions[program[i][1]];
+                    // Remove loc data which is only for error parsing
+                    program[i].pop();
+                    program[i].pop();
                 }
-                else if (program[i][0] == 'PARAM' && program[i][1] != 0) {
-                    yy.parser.parseError("Unknown variable: " + program[i][1], {
-                        text: program[i][1],
-                        line: current_line
-                    });
+                else if (program[i][0] == 'PARAM') {
+                    if (program[i][1] != 0) {
+                        yy.parser.parseError("Unknown variable: " + program[i][1], {
+                            text: program[i][1],
+                            line: current_line,
+                            loc: program[i][2]
+                        });
+                    }
+                    else {
+                        program[i].pop();
+                    }
                 }
             }
             return program;
@@ -21983,15 +22088,31 @@
                         this.$ = $$[$0 - 1];
                         break;
                     case 5:
-                        this.$ = [[$$[$0].toLowerCase(), null, 1, $$[$0 - 1][0][1]]];
+                        this._$.first_line = _$[$0 - 2].first_line;
+                        this._$.first_column = _$[$0 - 2].first_column;
+                        this._$.last_line = _$[$0].last_line;
+                        this._$.last_column = _$[$0].last_column;
+                        this.$ = [[$$[$0].toLowerCase(), null, 1, $$[$0 - 1][0][1], this._$]];
                         break;
                     case 6:
-                        this.$ = [[$$[$0 - 3].toLowerCase(), null, 2, $$[$0 - 4][0][1]]];
+                        this._$.first_line = _$[$0 - 5].first_line;
+                        this._$.first_column = _$[$0 - 5].first_column;
+                        this._$.last_line = _$[$0].last_line;
+                        this._$.last_column = _$[$0].last_column;
+                        this.$ = [[$$[$0 - 3].toLowerCase(), null, 2, $$[$0 - 4][0][1], this._$]];
                         break;
                     case 7:
-                        this.$ = [[$$[$0 - 2].toLowerCase(), $$[$0 - 3].concat($$[$0]).concat([['RET']]), 1, $$[$0 - 3][0][1]]];
+                        this._$.first_line = _$[$0 - 4].first_line;
+                        this._$.first_column = _$[$0 - 4].first_column;
+                        this._$.last_line = _$[$0 - 2].last_line;
+                        this._$.last_column = _$[$0 - 2].last_column;
+                        this.$ = [[$$[$0 - 2].toLowerCase(), $$[$0 - 3].concat($$[$0]).concat([['RET']]), 1, $$[$0 - 3][0][1], this._$, this._$]];
                         break;
                     case 8:
+                        this._$.first_line = _$[$0 - 7].first_line;
+                        this._$.first_column = _$[$0 - 7].first_column;
+                        this._$.last_line = _$[$0 - 5].last_line;
+                        this._$.last_column = _$[$0 - 5].last_column;
                         var result = $$[$0 - 6].concat($$[$0]).concat([['RET']]);
                         var current_line = $$[$0 - 6][0][1];
                         for (var i = 0; i < result.length; i++) {
@@ -22004,13 +22125,14 @@
                                 }
                                 else {
                                     yy.parser.parseError("Unknown variable: " + $$[$0 - 3], {
-                                        text: $$[$0 - 3],
-                                        line: current_line + 1
+                                        text: result[i][1],
+                                        line: current_line + 1,
+                                        loc: result[i][2]
                                     });
                                 }
                             }
                         }
-                        this.$ = [[$$[$0 - 5].toLowerCase(), result, 2, $$[$0 - 6][0][1]]];
+                        this.$ = [[$$[$0 - 5].toLowerCase(), result, 2, $$[$0 - 6][0][1], this._$, _$[$0 - 3]]];
                         break;
                     case 9:
                         this.$ = $$[$0 - 2].concat($$[$0]);
@@ -22049,10 +22171,10 @@
                         this.$ = [['LINE', yylineno], ['RET']];
                         break;
                     case 24:
-                        this.$ = [['LINE', yylineno]].concat($$[$0 - 3]).concat($$[$0]).concat([['MEMORIZE']]);
+                        this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0].toLowerCase(), 1, _$[$0], _$[$0]], ['LINE', yylineno]];
                         break;
                     case 25:
-                        this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0].toLowerCase(), 1], ['LINE', yylineno]];
+                        this.$ = [['LINE', yylineno]].concat($$[$0 - 1]).concat([['CALL', $$[$0 - 3].toLowerCase(), 2, _$[$0 - 3], _$[$0 - 1]], ['LINE', yylineno]]);
                         break;
                     case 26:
                         this.$ = [['LINE', yylineno]].concat($$[$0 - 1]).concat([['CALL', $$[$0 - 3].toLowerCase(), 2], ['LINE', yylineno]]);
@@ -22234,7 +22356,7 @@
                             text: lexer.match,
                             token: this.terminals_[symbol] || symbol,
                             line: lexer.yylineno,
-                            loc: yyloc,
+                            loc: lexer.yylloc,
                             expected: expected
                         });
                     }
@@ -22307,7 +22429,8 @@
                     if (prototypes[function_list[i][0]] || functions[function_list[i][0]]) {
                         yy.parser.parseError("Prototype redefinition: " + function_list[i][0], {
                             text: function_list[i][0],
-                            line: function_list[i][3]
+                            line: function_list[i][3],
+                            loc: function_list[i][4],
                         });
                     }
                     prototypes[function_list[i][0]] = function_list[i][2];
@@ -22316,14 +22439,16 @@
                     if (functions[function_list[i][0]]) {
                         yy.parser.parseError("Function redefinition: " + function_list[i][0], {
                             text: function_list[i][0],
-                            line: function_list[i][3]
+                            line: function_list[i][3],
+                            loc: function_list[i][4]
                         });
                     }
                     else if (prototypes[function_list[i][0]]) {
                         if (prototypes[function_list[i][0]] != function_list[i][2]) {
                             yy.parser.parseError("Prototype parameter mismatch: " + function_list[i][0], {
                                 text: function_list[i][0],
-                                line: function_list[i][3]
+                                line: function_list[i][3],
+                                loc: function_list[i][5]
                             });
                         }
                     }
@@ -22342,7 +22467,8 @@
                             !prototypes[function_list[i][1][j][1]]) {
                             yy.parser.parseError("Undefined function: " + function_list[i][1][j][1], {
                                 text: function_list[i][1][j][1],
-                                line: current_line
+                                line: current_line,
+                                loc: function_list[i][1][j][4]
                             });
                         }
                     }
@@ -22358,23 +22484,35 @@
                     if (!functions[program[i][1]]) {
                         yy.parser.parseError("Undefined function: " + program[i][1], {
                             text: program[i][1],
-                            line: current_line
+                            line: current_line,
+                            loc: program[i][3]
                         });
                     }
                     else if (prototypes[program[i][1]] != program[i][2]) {
                         yy.parser.parseError("Function parameter mismatch: " + program[i][1], {
                             text: program[i][1],
-                            line: current_line
+                            line: current_line,
+                            loc: program[i][4],
+                            parameters: program[i][2],
                         });
                     }
                     program[i][2] = program[i][1];
                     program[i][1] = functions[program[i][1]];
+                    // Remove loc data which is only for error parsing
+                    program[i].pop();
+                    program[i].pop();
                 }
-                else if (program[i][0] == 'PARAM' && program[i][1] != 0) {
-                    yy.parser.parseError("Unknown variable: " + program[i][1], {
-                        text: program[i][1],
-                        line: current_line
-                    });
+                else if (program[i][0] == 'PARAM') {
+                    if (program[i][1] != 0) {
+                        yy.parser.parseError("Unknown variable: " + program[i][1], {
+                            text: program[i][1],
+                            line: current_line,
+                            loc: program[i][2]
+                        });
+                    }
+                    else {
+                        program[i].pop();
+                    }
                 }
             }
             return program;
@@ -22858,7 +22996,9 @@
             exports.main(process.argv.slice(1));
         }
     }
-    function pascalParser() { return karelpascal.parse.apply(karelpascal, arguments); }
+    function pascalParser() {
+        return karelpascal.parse.apply(karelpascal, arguments);
+    }
 
     if (typeof Event === 'undefined') {
         var Event = function (type) {
@@ -24346,17 +24486,598 @@
         return ERRORCODES[error];
     }
 
+    const DefaultWRStyle = {
+        disabled: '#4f4f4f',
+        exportCellBackground: '#f5f7a8',
+        karelColor: '#3E6AC1',
+        gridBackgroundColor: '#f8f9fA',
+        errorGridBackgroundColor: "#f5d5d5",
+        gridBorderColor: '#c4c4c4',
+        errorGridBorderColor: '#a8838f',
+        gutterBackgroundColor: '#e6e6e6',
+        gutterColor: "#444444",
+        beeperBackgroundColor: "#0ADB23",
+        beeperColor: "#000000",
+        wallColor: "#000000",
+        waffleColor: "#0d6dfd",
+        gutterSelectionBackgroundColor: "#86afd5",
+        gutterSelectionColor: "#000000",
+    };
+    const WR_CLEAN = {
+        disabled: '#4f4f4f',
+        exportCellBackground: '#f5f7a8',
+        karelColor: '#3E6AC1',
+        gridBackgroundColor: '#f8f9fA',
+        errorGridBackgroundColor: "#f5d5d5",
+        gridBorderColor: '#c4c4c4',
+        errorGridBorderColor: '#a8838f',
+        gutterBackgroundColor: '#e6e6e6',
+        gutterColor: "#444444",
+        beeperBackgroundColor: "#ffffff",
+        beeperColor: "#000000",
+        wallColor: "#000000",
+        waffleColor: "#0d6dfd",
+        gutterSelectionBackgroundColor: "#86afd5",
+        gutterSelectionColor: "#000000",
+    };
+    const WR_DARK = {
+        disabled: '#4f4f4f',
+        exportCellBackground: '#f5f7a8',
+        karelColor: '#328EAD',
+        gridBackgroundColor: '#282828',
+        errorGridBackgroundColor: "#5D3D3D",
+        gridBorderColor: '#565656',
+        errorGridBorderColor: '#565656',
+        gutterBackgroundColor: '#3B3B3B',
+        gutterColor: "#E8E8E8",
+        beeperBackgroundColor: "#005608",
+        beeperColor: "#ffffff",
+        wallColor: "#f1f1f1",
+        waffleColor: "#82e8ff",
+        gutterSelectionBackgroundColor: "#352f7f",
+        gutterSelectionColor: "#FCFCFC",
+    };
+    const WR_CONTRAST = {
+        disabled: '#4f4f4f',
+        exportCellBackground: '#f5f7a8',
+        karelColor: '#3F69DB',
+        gridBackgroundColor: '#f3f3f3',
+        errorGridBackgroundColor: "#5D3D3D",
+        gridBorderColor: '#565656',
+        errorGridBorderColor: '#565656',
+        gutterBackgroundColor: '#e3e3e3',
+        gutterColor: "#000000",
+        beeperBackgroundColor: "#000000",
+        beeperColor: "#ffffff",
+        wallColor: "#000000",
+        waffleColor: "#ff0000",
+        gutterSelectionBackgroundColor: "#000000",
+        gutterSelectionColor: "#ffffff",
+    };
+
+    function clearAllDisplayClasses(element) {
+        $(element).removeClass("d-none");
+        $(element).removeClass("d-lg-block");
+        $(element).removeClass("d-lg-none");
+    }
+    function hideElement$1(element) {
+        $(element).addClass("d-none");
+    }
+    function SetResponsiveness() {
+        clearAllDisplayClasses("#desktopView");
+        clearAllDisplayClasses("#phoneView");
+        $("#phoneView").addClass("d-lg-none");
+        $("#desktopView").addClass("d-none");
+        $("#desktopView").addClass("d-lg-block");
+    }
+    function SetDesktopView() {
+        clearAllDisplayClasses("#phoneView");
+        clearAllDisplayClasses("#desktopView");
+        hideElement$1("#phoneView");
+    }
+    function SetPhoneView() {
+        clearAllDisplayClasses("#phoneView");
+        clearAllDisplayClasses("#desktopView");
+        hideElement$1("#desktopView");
+    }
+    function responsiveHack() {
+        $("#phoneView").removeClass("position-absolute");
+        {
+            $("#phoneView").addClass("d-none");
+        }
+        $("#loadingModal").remove();
+    }
+
+    let editors = createEditors();
+    function getEditors() {
+        return editors;
+    }
+
+    function applyTheme(theme) {
+        SetEditorTheme(theme.extensions, getEditors()[0]);
+        const root = $(":root")[0];
+        root.style.setProperty("--editor-color", theme.color);
+        root.style.setProperty("--editor-background", theme.backgroundColor);
+        root.style.setProperty("--editor-gutter-bg", theme.gutterBackgroundColor);
+        root.style.setProperty("--editor-gutter", theme.gutterColor);
+    }
+
+    const DarkCodeTheme = {
+        color: "#9CDCFE",
+        backgroundColor: "#1F1F1F",
+        gutterBackgroundColor: "#1F1F1F",
+        gutterColor: "#6e7681",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#DCDCAA" },
+                { tag: tags.className, color: "#4EC9B0" },
+                { tag: tags.keyword, color: "#C586C0" },
+                { tag: tags.controlKeyword, color: "#C586C0" },
+                { tag: tags.definitionKeyword, color: "#569CD6" },
+                { tag: tags.number, color: "#b5cea8" },
+                { tag: tags.operator, color: "#efefef" },
+                { tag: tags.brace, color: "#FFD700" },
+                { tag: tags.blockComment, color: "#6A9955", fontStyle: "italic" },
+                { tag: tags.comment, color: "#6A9955", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#DCDCAA" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#b3c6c7"
+                }
+            })
+        ]
+    };
+    const LightCodeTheme = {
+        color: "#0451A5",
+        backgroundColor: "#FAFAFA",
+        gutterBackgroundColor: "#FAFAFA",
+        gutterColor: "#6e7681",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#795E26" },
+                { tag: tags.className, color: "#4EC9B0" },
+                { tag: tags.keyword, color: "#AF00DB" },
+                { tag: tags.controlKeyword, color: "#AF00DB" },
+                { tag: tags.definitionKeyword, color: "#569CD6" },
+                { tag: tags.number, color: "#098658" },
+                { tag: tags.operator, color: "#050505" },
+                { tag: tags.brace, color: "#0431FA" },
+                { tag: tags.blockComment, color: "#008000", fontStyle: "italic" },
+                { tag: tags.comment, color: "#008000", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#795E26" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#b3c6c7"
+                }
+            })
+        ]
+    };
+
+    const darkClassicHighlight = {
+        color: "var(--bs-body-color)",
+        backgroundColor: "rgba(var(--bs-body-bg-rgb), var(--bs-bg-opacity))",
+        gutterBackgroundColor: "var(--bs-secondary-bg)",
+        gutterColor: "var(--bs-emphasis-color)",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#93bf74" },
+                { tag: tags.keyword, color: "#C586C0" },
+                { tag: tags.className, color: "#C586C0" },
+                { tag: tags.brace, color: "#94a4cb" },
+                { tag: tags.number, color: "#569CD6" },
+                { tag: tags.operator, color: "#77a1d5" },
+                { tag: tags.blockComment, color: "#a0b6b6", fontStyle: "italic" },
+                { tag: tags.comment, color: "#a0b6b6", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#9CDCFE" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#4e4d48"
+                }
+            })
+        ]
+    };
+
+    const OMIHighlight = {
+        color: "#FFFF00",
+        backgroundColor: "#000080",
+        gutterBackgroundColor: "#F5F5F5",
+        gutterColor: "#000000",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#00FFFF" },
+                { tag: tags.keyword, color: "#00FFFF" },
+                { tag: tags.controlKeyword, color: "#00FFFF" },
+                { tag: tags.definitionKeyword, color: "#00FFFF" },
+                { tag: tags.number, color: "#FF00FF" },
+                { tag: tags.operator, color: "#00FFFF" },
+                { tag: tags.brace, color: "#00FFFF" },
+                { tag: tags.constant(tags.variableName), color: "#00FFFF" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#0000FF"
+                }
+            })
+        ]
+    };
+
+    const ReKarelHighlight = {
+        color: "#fafafa",
+        backgroundColor: "var(--bs-dark)",
+        gutterBackgroundColor: "var(--bs-secondary-bg)",
+        gutterColor: "var(--bs-emphasis-color)",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#ffda6a" },
+                { tag: tags.keyword, color: "#ea868f" },
+                { tag: tags.brace, color: "#ea868f" },
+                { tag: tags.controlKeyword, color: "#6ea8fe" },
+                { tag: tags.definitionKeyword, color: "#6ea8fe" },
+                { tag: tags.number, color: "#ffda6a" },
+                { tag: tags.operator, color: "#77a1d5" },
+                { tag: tags.blockComment, color: "#75b798", fontStyle: "italic" },
+                { tag: tags.comment, color: "#75b798", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#6edff6" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#4e4d48"
+                }
+            })
+        ]
+    };
+    const LightReKarelHighlight = {
+        color: "#2e2e2e",
+        backgroundColor: "var(--bs-light)",
+        gutterBackgroundColor: "var(--bs-secondary-bg)",
+        gutterColor: "var(--bs-emphasis-color)",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#ff9c07" },
+                { tag: tags.keyword, color: "#c62e3d" },
+                { tag: tags.brace, color: "#c62e3d" },
+                { tag: tags.controlKeyword, color: "#0d6efd " },
+                { tag: tags.definitionKeyword, color: "#0d6efd " },
+                { tag: tags.number, color: "#ff9c07" },
+                { tag: tags.operator, color: "#77a1d5" },
+                { tag: tags.blockComment, color: "#198754", fontStyle: "italic" },
+                { tag: tags.comment, color: "#198754", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#24a7db" },
+            ])),
+        ]
+    };
+
+    const SepiaTheme = {
+        color: "#3a3d42",
+        backgroundColor: "#fffde5",
+        gutterBackgroundColor: "#d9ceb6",
+        gutterColor: "#2d2e3b",
+        extensions: [
+            syntaxHighlighting(HighlightStyle.define([
+                { tag: tags.atom, color: "#707894" },
+                { tag: tags.keyword, color: "#cb3551" },
+                { tag: tags.controlKeyword, color: "#3f9c4f" },
+                { tag: tags.definitionKeyword, color: "#3f9c4f" },
+                { tag: tags.number, color: "#22867e" },
+                { tag: tags.operator, color: "#3f9c4f" },
+                { tag: tags.blockComment, color: "#973d1a", fontStyle: "italic" },
+                { tag: tags.comment, color: "#973d1a", fontStyle: "italic" },
+                { tag: tags.constant(tags.variableName), color: "#1f34a1" },
+            ])),
+            EditorView.theme({
+                '&.cm-focused .cm-selectionBackground, ::selection': {
+                    backgroundColor: "#b3c6c7"
+                }
+            })
+        ]
+    };
+
+    const DarkEditorThemes = {
+        'classic': darkClassicHighlight,
+        'rekarel': ReKarelHighlight,
+        'sepia': SepiaTheme,
+        'omi': OMIHighlight,
+        'code': DarkCodeTheme,
+    };
+    const LightEditorThemes = {
+        'classic': classicHighlight,
+        'rekarel': LightReKarelHighlight,
+        'sepia': SepiaTheme,
+        'omi': OMIHighlight,
+        'code': LightCodeTheme,
+    };
+
+    function SetLightTheme(theme) {
+        $(":root").attr("data-bs-theme", "light");
+        applyTheme(LightEditorThemes[theme]);
+    }
+    function SetDarkTheme(theme) {
+        $(":root").attr("data-bs-theme", "dark");
+        applyTheme(DarkEditorThemes[theme]);
+    }
+    function SetSystemTheme(theme) {
+        if (window.matchMedia) {
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                SetDarkTheme(theme);
+            }
+            else {
+                SetLightTheme(theme);
+            }
+            return;
+        }
+        SetLightTheme(theme); //Default light theme
+    }
+
+    const APP_SETTING = 'appSettings';
+    const SETTINGS_VERSION = "0.6.0";
+    let appSettings = {
+        version: SETTINGS_VERSION,
+        interface: "desktop",
+        editorTheme: "classic",
+        editorFontSize: 12,
+        theme: "system",
+        worldRendererStyle: DefaultWRStyle,
+        slowExecutionLimit: 200000
+    };
+    function isFontSize(str) {
+        return 6 < str && str < 31;
+    }
+    function isResponsiveInterfaces(str) {
+        return ["auto", "desktop", "mobile"].indexOf(str) > -1;
+    }
+    function isTheme(str) {
+        return ["system", "light", "dark"].indexOf(str) > -1;
+    }
+    let DesktopUI$1;
+    function applySettings(settings, desktopUI) {
+        switch (settings.interface) {
+            case "auto":
+                SetResponsiveness();
+                break;
+            case "desktop":
+                SetDesktopView();
+                break;
+            case "mobile":
+                SetPhoneView();
+                break;
+            default:
+                SetDesktopView();
+                break;
+        }
+        if (!(settings.editorTheme in DarkEditorThemes))
+            settings.editorTheme = "classic";
+        switch (settings.theme) {
+            case "system":
+                SetSystemTheme(settings.editorTheme);
+                break;
+            case "light":
+                SetLightTheme(settings.editorTheme);
+                break;
+            case "dark":
+                SetDarkTheme(settings.editorTheme);
+                break;
+            default:
+                SetDarkTheme(settings.editorTheme);
+        }
+        const root = $(":root")[0];
+        root.style.setProperty("--editor-font-size", `${settings.editorFontSize}pt`);
+        root.style.setProperty("--waffle-color", `${settings.worldRendererStyle.waffleColor}`);
+        if (settings.interface == "desktop")
+            desktopUI.ResizeCanvas();
+        desktopUI.worldController.renderer.style = settings.worldRendererStyle;
+        desktopUI.worldController.Update();
+        if (localStorage)
+            localStorage.setItem(APP_SETTING, JSON.stringify(appSettings));
+    }
+    function setSettings(event, desktopUI) {
+        let interfaceType = $("#settingsForm select[name=interface]").val();
+        let fontSize = $("#settingsForm input[name=fontSize]").val();
+        let slowModeLimit = $("#settingsSlowModeLimit").val();
+        let theme = $("#settingsForm select[name=theme]").val();
+        let style = $("#settingsForm select[name=editorStyle]").val();
+        console.log(fontSize);
+        if (isResponsiveInterfaces(interfaceType)) {
+            appSettings.interface = interfaceType;
+        }
+        if (isFontSize(fontSize)) {
+            appSettings.editorFontSize = fontSize;
+        }
+        if (isTheme(theme)) {
+            appSettings.theme = theme;
+        }
+        appSettings.slowExecutionLimit = slowModeLimit;
+        appSettings.editorTheme = style;
+        console.log(appSettings);
+        applySettings(appSettings, desktopUI);
+        event.preventDefault();
+        return false;
+    }
+    function loadSettingsFromMemory() {
+        const jsonString = localStorage === null || localStorage === void 0 ? void 0 : localStorage.getItem(APP_SETTING);
+        if (jsonString) {
+            const memorySettings = JSON.parse(jsonString);
+            if (memorySettings.version == null)
+                return;
+            if (memorySettings.version !== SETTINGS_VERSION) {
+                localStorage.removeItem(memorySettings);
+                return;
+            }
+            appSettings = memorySettings;
+        }
+    }
+    function loadSettingsToModal() {
+        console.log("show", appSettings);
+        $("#settingsInterface").val(appSettings.interface);
+        $("#settingsFontSize").val(appSettings.editorFontSize);
+        $("#settingsTheme").val(appSettings.theme);
+        $("#settingsStyle").val(appSettings.editorTheme);
+        $("#settingsSlowModeLimit").val(appSettings.slowExecutionLimit);
+        showOrHideSlowExecutionLimit();
+    }
+    function InitSettings(desktopUI) {
+        DesktopUI$1 = desktopUI;
+        loadSettingsFromMemory();
+        $("#settingsModal").on("show.bs.modal", (e) => {
+            loadSettingsToModal();
+        });
+        $("#settingsForm").on("submit", (e) => {
+            setSettings(e, desktopUI);
+        });
+    }
+    function showOrHideSlowExecutionLimit() {
+        if ($("#settingsSlowModeLimit").val() > 200000) {
+            $("#slowModeWarning").show();
+        }
+        else {
+            $("#slowModeWarning").hide();
+        }
+    }
+    function StartSettings(desktopUI) {
+        applySettings(appSettings, desktopUI);
+        $(document).on("keydown", (e) => {
+            if (e.ctrlKey && e.which === 75) {
+                let fontSize = appSettings.editorFontSize;
+                fontSize--;
+                if (fontSize < 7)
+                    fontSize = 7;
+                appSettings.editorFontSize = fontSize;
+                applySettings(appSettings, desktopUI);
+                e.preventDefault();
+                return false;
+            }
+            if (e.ctrlKey && e.which === 76) {
+                let fontSize = appSettings.editorFontSize;
+                fontSize++;
+                if (fontSize > 30)
+                    fontSize = 30;
+                appSettings.editorFontSize = fontSize;
+                applySettings(appSettings, desktopUI);
+                e.preventDefault();
+                return false;
+            }
+        });
+        $("#settingsSlowModeLimit").on("change", () => showOrHideSlowExecutionLimit());
+    }
+    function SetWorldRendererStyle(style) {
+        appSettings.worldRendererStyle = style;
+        applySettings(appSettings, DesktopUI$1);
+    }
+    function GetCurrentSetting() { return appSettings; }
+
+    var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+        function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+        return new (P || (P = Promise))(function (resolve, reject) {
+            function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+            function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+            function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+            step((generator = generator.apply(thisArg, _arguments || [])).next());
+        });
+    };
+    class Throbber {
+        constructor(element) {
+            this.element = element;
+            this.shouldBeVisible = false;
+            this.visible = false;
+            this.hide();
+        }
+        show() {
+            this.element.show();
+            this.visible = true;
+        }
+        hide() {
+            this.shouldBeVisible = false;
+            this.visible = false;
+            this.element.hide();
+        }
+        showInSeconds(seconds) {
+            this.shouldBeVisible = true;
+            setTimeout(() => {
+                if (this.shouldBeVisible) {
+                    this.show();
+                }
+            }, seconds * 1000);
+        }
+        performTask(task) {
+            return __awaiter(this, void 0, void 0, function* () {
+                this.show();
+                const promise = new Promise((resolve, reject) => setTimeout(() => {
+                    let result = task();
+                    this.hide();
+                    resolve(result);
+                }));
+                return promise;
+            });
+        }
+    }
+    const throbber = new Throbber($("#throbber"));
+
+    const parseErrorState = StateEffect.define({
+        map: ({ from, to }, change) => ({ from: change.mapPos(from), to: change.mapPos(to) })
+    });
+    const underlineMark = Decoration.mark({ class: "cm-underline" });
+    const parseErrorField = StateField.define({
+        create() {
+            return Decoration.none;
+        },
+        update(underlines, tr) {
+            underlines = underlines.map(tr.changes);
+            for (let e of tr.effects)
+                if (e.is(parseErrorState)) {
+                    if (e.value.from === -1) {
+                        underlines = RangeSet.empty;
+                    }
+                    else {
+                        underlines = underlines.update({
+                            add: [underlineMark.range(e.value.from, e.value.to)]
+                        });
+                    }
+                }
+            return underlines;
+        },
+        provide: f => EditorView.decorations.from(f)
+    });
+    const underlineTheme = EditorView.baseTheme({
+        ".cm-underline": {
+            backgroundImage: `url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="3">%3Cpath%20d%3D%22m0%202.5%20l2%20-1.5%20l1%200%20l2%201.5%20l1%200%22%20stroke%3D%22%23d11%22%20fill%3D%22none%22%20stroke-width%3D%22.9%22%2F%3E</svg>')`,
+            backgroundPosition: "left bottom",
+            backgroundRepeat: "repeat-x",
+            paddingBottom: "0.7px",
+        }
+    });
+    function underlineError(view, line, from, to) {
+        console.log(line, from, to);
+        let real_from = view.state.doc.line(line).from + from;
+        let real_to = view.state.doc.line(line).from + to;
+        let effects = [parseErrorState.of({ from: real_from, to: real_to })];
+        if (!view.state.field(parseErrorField, false))
+            effects.push(StateEffect.appendConfig.of([parseErrorField,
+                underlineTheme]));
+        view.dispatch({ effects });
+        return true;
+    }
+    function clearUnderlineError(view) {
+        let effects = [parseErrorState.of({ from: -1, to: -1 })];
+        if (!view.state.field(parseErrorField, false))
+            effects.push(StateEffect.appendConfig.of([parseErrorField,
+                underlineTheme]));
+        view.dispatch({ effects });
+        return true;
+    }
+
     class KarelController {
-        constructor(world, mainEditor) {
+        constructor(world) {
             this.world = world;
             this.running = false;
-            this.mainEditor = mainEditor;
             this.onMessage = [];
             this.onStateChange = [];
             this.onStep = [];
             this.onReset = [];
             this.onNewWorld = [];
             this.onCompile = [];
+            this.onSlowMode = [];
             this.state = "unstarted";
             this.endedOnError = false;
             this.autoStepInterval = 0;
@@ -24372,14 +25093,16 @@
         //     this.OnStackChanges();
         // }
         Compile(notifyOnSuccess = true) {
-            let code = this.mainEditor.state.doc.toString();
+            const mainEditor = getEditors()[0];
+            let code = mainEditor.state.doc.toString();
             // let language: string = detectLanguage(code);
             let language = detectLanguage(code);
             if (language === "java" || language === "pascal") {
-                setLanguage(this.mainEditor, language);
+                setLanguage(mainEditor, language);
             }
             let response = null;
             try {
+                clearUnderlineError(mainEditor);
                 response = compile(code);
                 //TODO: expand message       
                 if (notifyOnSuccess)
@@ -24389,6 +25112,10 @@
             catch (e) {
                 //TODO: Expand error
                 this.SendMessage(decodeError(e, language), "error");
+                if (e.hash.loc) {
+                    const status = e.hash;
+                    underlineError(mainEditor, status.loc.first_line, status.loc.first_column, status.loc.last_column);
+                }
                 this.NotifyCompile(false, language);
                 return null;
             }
@@ -24440,38 +25167,14 @@
         CheckForBreakPointOnCurrentLine() {
             let runtime = this.GetRuntime();
             if (runtime.state.line >= 0) {
-                let codeLine = this
-                    .mainEditor
-                    .state
-                    .doc
-                    .line(runtime.state.line + 1);
-                codeLine.from;
-                let breakpoints = this.mainEditor.state.field(breakpointState);
-                let hasBreakpoint = false;
-                breakpoints.between(codeLine.from, codeLine.from, () => { hasBreakpoint = true; });
+                const mainEditor = getEditors()[0];
+                let hasBreakpoint = CheckForBreakPointOnLine(mainEditor, runtime.state.line + 1);
                 if (hasBreakpoint) {
-                    this.BreakPointMessage(codeLine.number);
+                    this.BreakPointMessage(runtime.state.line + 1);
                 }
                 return hasBreakpoint;
             }
             return false;
-        }
-        HighlightCurrentLine() {
-            let runtime = this.GetRuntime();
-            if (runtime.state.line >= 0) {
-                let codeLine = this
-                    .mainEditor
-                    .state
-                    .doc
-                    .line(runtime.state.line + 1);
-                this.mainEditor.dispatch({
-                    selection: {
-                        anchor: codeLine.from,
-                        head: codeLine.from
-                    },
-                    scrollIntoView: true,
-                });
-            }
         }
         Step() {
             if (!this.StartStep())
@@ -24487,11 +25190,16 @@
             const startWStackSize = runtime.state.stackSize;
             runtime.step();
             if (runtime.state.stackSize > startWStackSize) {
-                while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize)
-                    ;
-                runtime.step();
+                throbber.performTask(() => {
+                    while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize)
+                        ;
+                    runtime.step();
+                })
+                    .then(() => this.EndStep());
             }
-            this.EndStep();
+            else {
+                this.EndStep();
+            }
         }
         StepOut() {
             if (!this.StartStep())
@@ -24502,32 +25210,34 @@
                 this.RunTillEnd();
                 return;
             }
-            while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize)
-                ;
-            this.EndStep();
+            throbber.performTask(() => {
+                while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize)
+                    ;
+            }).then(_ => this.EndStep());
         }
         StartAutoStep(delay) {
             this.StopAutoStep(); //Avoid thread leak
             if (this.state === "finished") {
-                return;
+                return false;
             }
             this.autoStepping = true;
             if (!this.running) {
                 if (!this.StartRun()) {
                     //Code Failed
-                    return;
+                    return false;
                 }
             }
             if (this.state !== "running") {
                 this.ChangeState("running");
             }
-            this.autoStepInterval = setInterval(() => {
+            this.autoStepInterval = window.setInterval(() => {
                 if (!this.running) {
                     this.StopAutoStep();
                     return;
                 }
                 this.Step();
             }, delay);
+            return true;
         }
         ChangeAutoStepDelay(delay) {
             if (!this.IsAutoStepping()) {
@@ -24557,18 +25267,19 @@
             let runtime = this.GetRuntime();
             // runtime.disableStackEvents= false; // FIXME: This should only be done when no breakpoints
             // runtime.disableStackEvents= true; // FIXME: This should only be done when no breakpoints
-            while (this.PerformAutoStep(ignoreBreakpoints))
-                ;
-            // this.desktopController.CheckUpdate();
-            this.HighlightCurrentLine();
-            if (!runtime.state.running) {
-                this.EndMessage();
-                this.ChangeState("finished");
-            }
-            else {
-                this.Pause();
-            }
-            this.NotifyStep();
+            throbber.performTask(() => {
+                while (this.PerformAutoStep(ignoreBreakpoints))
+                    ;
+            }).then(_ => {
+                if (!runtime.state.running) {
+                    this.EndMessage();
+                    this.ChangeState("finished");
+                }
+                else {
+                    this.Pause();
+                }
+                this.NotifyStep();
+            });
         }
         RegisterMessageCallback(callback) {
             this.onMessage.push(callback);
@@ -24587,6 +25298,9 @@
         }
         RegisterCompileObserver(callback) {
             this.onCompile.push(callback);
+        }
+        RegisterSlowModeObserver(callback) {
+            this.onSlowMode.push(callback);
         }
         Resize(w, h) {
             this.Reset();
@@ -24619,7 +25333,6 @@
             return true;
         }
         EndStep() {
-            this.HighlightCurrentLine();
             if (!this.GetRuntime().state.running) {
                 this.EndMessage();
                 this.ChangeState("finished");
@@ -24634,9 +25347,11 @@
         PerformAutoStep(ignoreBreakpoints = false) {
             const runtime = this.GetRuntime();
             const result = runtime.step();
-            if (runtime.state.ic >= 200000 && !runtime.disableStackEvents) {
+            const slowLimit = GetCurrentSetting().slowExecutionLimit;
+            if (runtime.state.ic >= slowLimit && !runtime.disableStackEvents) {
                 runtime.disableStackEvents = true;
-                this.SendMessage("Karel alcanzó las 200,000 instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse", "warning");
+                this.SendMessage(`Karel alcanzó las ${slowLimit.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse`, "warning");
+                this.NotifySlowMode(slowLimit);
             }
             return result && (ignoreBreakpoints || !this.CheckForBreakPointOnCurrentLine());
         }
@@ -24657,6 +25372,9 @@
         }
         NotifyCompile(success, language) {
             this.onCompile.forEach((callback) => callback(this, success, language));
+        }
+        NotifySlowMode(limit) {
+            this.onSlowMode.forEach((callback) => callback(this, limit));
         }
         ChangeState(nextState) {
             this.state = nextState;
@@ -24794,15 +25512,25 @@
             EOF: 'el final del programa',
         },
     };
+    function jumpable(line, column) {
+        let c = column;
+        if (column == null) {
+            c = 0;
+        }
+        const onclick = `karel.MoveEditorCursorToLine(${line}, ${c})`;
+        return `<a class="text-decoration-underline" href="#" title="Haz clic para ir al error" onclick="${onclick}">línea ${line}</a>`;
+    }
     function decodeError(e, lan) {
         if (lan === "ruby" || lan === "none") {
             return "Error de compilación, no se puede reconocer el lenguaje";
         }
         let status = e.hash;
+        console.log(JSON.stringify(e));
+        console.log(e);
         if (status == null) {
             return "Error de compilación";
         }
-        let message = `Error de compilación en la línea ${status.line + 1}\n<br>\n<div class="card"><div class="card-body">`;
+        let message = `Error de compilación en  la ${jumpable(status.line + 1, status === null || status === void 0 ? void 0 : status.loc.first_column)}\n<br>\n<div class="card"><div class="card-body">`;
         if (status.expected) {
             let expectations = status.expected.map((x => ERROR_TOKENS[lan][x.replace(/^'+/, "").replace(/'+$/, "")]));
             message += `Se encontró "${status.text}" cuando se esperaba ${expectations.join(", ")}`;
@@ -24820,6 +25548,20 @@
             }
             else if (errorString.includes("Prototype redefinition")) {
                 message += `El prototipo <b>${status.text}</b> ya fue definido previamente`;
+            }
+            else if (errorString.includes("Unknown variable")) {
+                message += `El parámetro <b>${status.text}</b> no está definido`;
+            }
+            else if (errorString.includes("Function parameter mismatch")) {
+                if (status.parameters === 2) {
+                    message += `La función <b>${status.text}</b> no acepta parámetro `;
+                }
+                else {
+                    message += `La función <b>${status.text}</b> esperaba un parámetro `;
+                }
+            }
+            else if (errorString.includes("Prototype parameter mismatch")) {
+                message += `La función <b>${status.text}</b> tiene un número distinto de parámetros que su prototipo `;
             }
             else {
                 message += "Error desconocido";
@@ -25132,11 +25874,12 @@
             }
             this.Update();
         }
-        ToggleKarelPosition() {
+        ToggleKarelPosition(rotate = false) {
             if (this.lock)
                 return;
             this.karelController.world.move(this.selection.r, this.selection.c);
-            this.karelController.world.rotate();
+            if (rotate)
+                this.karelController.world.orientation = (this.karelController.world.orientation + 3) % 4;
             this.Update();
         }
         FocusOrigin() {
@@ -25384,6 +26127,7 @@
                 this.OnStackChanges(); });
             this.OnStackChanges();
             KarelController.GetInstance().RegisterResetObserver((_) => this.clearStack());
+            KarelController.GetInstance().RegisterSlowModeObserver((_, limit) => this.slowMode(limit));
         }
         OnStackChanges() {
             //FIXME: Don't hardcode the id. #pilaTab
@@ -25394,13 +26138,13 @@
                 if (runtime.state.stackSize == MAX_STACK_SIZE + 1) {
                     this.panel.prepend('<div class="well well-small">' +
                         `<span class="text-secondary">${MAX_STACK_SIZE + 1} - ${runtime.state.stackSize}</span>` +
-                        '<span class="text-danger"> Hay demasiadas funciones en la pila, las más recientes no se muestran en la interfaz, pero estan ahí </span></div>');
+                        '<span class="text-warning"> Hay demasiadas funciones en la pila, las más recientes no se muestran en la interfaz, pero estan ahí </span></div>');
                     return;
                 }
                 if (runtime.state.stackSize > MAX_STACK_SIZE) {
                     this.panel.find('>:first-child').html('<div class="well well-small">' +
                         `<span class="text-secondary">${MAX_STACK_SIZE + 1} - ${runtime.state.stackSize}</span>` +
-                        '<span class="text-danger"> Hay demasiadas funciones en la pila, las más recientes no se muestran en la interfaz, pero estan ahí </span></div>');
+                        '<span class="text-warning"> Hay demasiadas funciones en la pila, las más recientes no se muestran en la interfaz, pero estan ahí </span></div>');
                     return;
                 }
                 this.panel.prepend('<div class="well well-small">' +
@@ -25414,8 +26158,12 @@
             });
             // @ts-ignore
             runtime.addEventListener('return', evt => {
-                if (runtime.state.stackSize > MAX_STACK_SIZE)
+                if (runtime.state.stackSize > MAX_STACK_SIZE) {
+                    this.panel.find('>:first-child').html('<div class="well well-small">' +
+                        `<span class="text-secondary">${MAX_STACK_SIZE + 1} - ${runtime.state.stackSize}</span>` +
+                        '<span class="text-warning"> Hay demasiadas funciones en la pila, las más recientes no se muestran en la interfaz, pero estan ahí </span></div>');
                     return;
+                }
                 this.panel.find('>:first-child').remove();
             });
             // @ts-ignore
@@ -25425,6 +26173,11 @@
         }
         clearStack() {
             this.panel.empty();
+        }
+        slowMode(limit) {
+            const txt = limit.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            this.panel.prepend('<div class="well well-small">' +
+                `<span class="text-danger"> <i class="bi bi-exclamation-triangle-fill"></i> Se ejecutaron más de ${txt} instrucciones, por lo que se activo el modo de ejecución rápido, así que la pila muestra el estado en el que se encontraba hasta la instrucción ${txt} </span><hr></div>`);
         }
     }
 
@@ -25480,75 +26233,6 @@
         }
     }
 
-    const DefaultWRStyle = {
-        disabled: '#4f4f4f',
-        exportCellBackground: '#f5f7a8',
-        karelColor: '#3E6AC1',
-        gridBackgroundColor: '#f8f9fA',
-        errorGridBackgroundColor: "#f5d5d5",
-        gridBorderColor: '#c4c4c4',
-        errorGridBorderColor: '#a8838f',
-        gutterBackgroundColor: '#e6e6e6',
-        gutterColor: "#444444",
-        beeperBackgroundColor: "#0ADB23",
-        beeperColor: "#000000",
-        wallColor: "#000000",
-        waffleColor: "#0d6dfd",
-        gutterSelectionBackgroundColor: "#86afd5",
-        gutterSelectionColor: "#000000",
-    };
-    const WR_CLEAN = {
-        disabled: '#4f4f4f',
-        exportCellBackground: '#f5f7a8',
-        karelColor: '#3E6AC1',
-        gridBackgroundColor: '#f8f9fA',
-        errorGridBackgroundColor: "#f5d5d5",
-        gridBorderColor: '#c4c4c4',
-        errorGridBorderColor: '#a8838f',
-        gutterBackgroundColor: '#e6e6e6',
-        gutterColor: "#444444",
-        beeperBackgroundColor: "#ffffff",
-        beeperColor: "#000000",
-        wallColor: "#000000",
-        waffleColor: "#0d6dfd",
-        gutterSelectionBackgroundColor: "#86afd5",
-        gutterSelectionColor: "#000000",
-    };
-    const WR_DARK = {
-        disabled: '#4f4f4f',
-        exportCellBackground: '#f5f7a8',
-        karelColor: '#328EAD',
-        gridBackgroundColor: '#282828',
-        errorGridBackgroundColor: "#5D3D3D",
-        gridBorderColor: '#565656',
-        errorGridBorderColor: '#565656',
-        gutterBackgroundColor: '#3B3B3B',
-        gutterColor: "#E8E8E8",
-        beeperBackgroundColor: "#005608",
-        beeperColor: "#ffffff",
-        wallColor: "#f1f1f1",
-        waffleColor: "#82e8ff",
-        gutterSelectionBackgroundColor: "#352f7f",
-        gutterSelectionColor: "#FCFCFC",
-    };
-    const WR_CONTRAST = {
-        disabled: '#4f4f4f',
-        exportCellBackground: '#f5f7a8',
-        karelColor: '#3F69DB',
-        gridBackgroundColor: '#f3f3f3',
-        errorGridBackgroundColor: "#5D3D3D",
-        gridBorderColor: '#565656',
-        errorGridBorderColor: '#565656',
-        gutterBackgroundColor: '#e3e3e3',
-        gutterColor: "#000000",
-        beeperBackgroundColor: "#000000",
-        beeperColor: "#ffffff",
-        wallColor: "#000000",
-        waffleColor: "#ff0000",
-        gutterSelectionBackgroundColor: "#000000",
-        gutterSelectionColor: "#ffffff",
-    };
-
     class ControlBar {
         constructor(ui, worldController) {
             this.ui = ui;
@@ -25600,8 +26284,8 @@
         }
         AutoStep() {
             let delay = parseInt(this.ui.delayInput.val());
-            KarelController.GetInstance().StartAutoStep(delay);
-            this.SetPlayMode();
+            if (KarelController.GetInstance().StartAutoStep(delay))
+                this.SetPlayMode();
         }
         PauseStep() {
             KarelController.GetInstance().Pause();
@@ -25857,7 +26541,8 @@
             }
             const overrideShift = new Set([37, 38, 39, 40]);
             let hotkeys = new Map([
-                [71, () => { this.worldController.ToggleKarelPosition(); }],
+                [71, () => { this.worldController.ToggleKarelPosition(true); }],
+                [80, () => { this.worldController.ToggleKarelPosition(false); }],
                 [82, () => { this.worldController.SetBeepers(0); }],
                 [81, () => { this.worldController.ChangeBeepers(-1); }],
                 [69, () => { this.worldController.ChangeBeepers(1); }],
@@ -26014,11 +26699,23 @@
     }
 
     const fileRegex$1 = /^[a-zA-Z0-9._]+$/;
-    function setFileNameLink$1(modal, editor) {
+    function setFileNameLink$1(modal, editor, changeInput = false) {
         let newFilename = $(modal.inputField).val();
+        let extension = "txt";
+        if ((sessionStorage === null || sessionStorage === void 0 ? void 0 : sessionStorage.getItem("rekarel:lang")) === "java") {
+            extension = "kj";
+        }
+        else {
+            extension = "kp";
+        }
         if (!fileRegex$1.test(newFilename)) {
-            $(modal.wrongCodeWarning).removeAttr("hidden");
-            newFilename = "code.txt";
+            newFilename = `code.${extension}`;
+            if (changeInput) {
+                $(modal.inputField).val(newFilename);
+            }
+            else {
+                $(modal.wrongCodeWarning).removeAttr("hidden");
+            }
         }
         else {
             $(modal.wrongCodeWarning).attr("hidden", "");
@@ -26027,8 +26724,23 @@
         $(modal.confirmBtn).attr("href", window.URL.createObjectURL(blob));
         $(modal.confirmBtn).attr("download", newFilename);
     }
+    function openModal(modal, editor) {
+        let extension = "txt";
+        if ((sessionStorage === null || sessionStorage === void 0 ? void 0 : sessionStorage.getItem("rekarel:lang")) === "java") {
+            extension = "kj";
+        }
+        else {
+            extension = "kp";
+        }
+        let newFilename = $(modal.inputField).val();
+        if (newFilename.endsWith('.kj') || newFilename.endsWith('.kp')) {
+            newFilename = newFilename.slice(0, -2) + extension;
+        }
+        $(modal.inputField).val(newFilename);
+        setFileNameLink$1(modal, editor, true);
+    }
     function hookDownloadModel(modal, editor) {
-        $(modal.modal).on('show.bs.modal', () => setFileNameLink$1(modal, editor));
+        $(modal.modal).on('show.bs.modal', () => openModal(modal, editor));
         $(modal.inputField).change(() => setFileNameLink$1(modal, editor));
     }
 
@@ -26117,6 +26829,7 @@
     function getCode(editor) {
         var file = document.createElement('input');
         file.type = 'file';
+        file.accept = '.kj, .kp';
         file.addEventListener('change', function (evt) {
             //@ts-ignore
             var files = evt.target.files; // @ts-ignore FileList object 
@@ -26147,6 +26860,7 @@
     function getWorldIn(karelController) {
         var file = document.createElement('input');
         file.type = 'file';
+        file.accept = '.in';
         file.addEventListener('change', function (evt) {
             //@ts-ignore
             var files = evt.target.files; // FileList object
@@ -26175,404 +26889,6 @@
         $(navbar.openCode).on("click", () => getCode(editor));
         $(navbar.openWorldIn).on("click", () => getWorldIn(karelController));
     }
-
-    function clearAllDisplayClasses(element) {
-        $(element).removeClass("d-none");
-        $(element).removeClass("d-lg-block");
-        $(element).removeClass("d-lg-none");
-    }
-    function hideElement$1(element) {
-        $(element).addClass("d-none");
-    }
-    function SetResponsiveness() {
-        clearAllDisplayClasses("#desktopView");
-        clearAllDisplayClasses("#phoneView");
-        $("#phoneView").addClass("d-lg-none");
-        $("#desktopView").addClass("d-none");
-        $("#desktopView").addClass("d-lg-block");
-    }
-    function SetDesktopView() {
-        clearAllDisplayClasses("#phoneView");
-        clearAllDisplayClasses("#desktopView");
-        hideElement$1("#phoneView");
-    }
-    function SetPhoneView() {
-        clearAllDisplayClasses("#phoneView");
-        clearAllDisplayClasses("#desktopView");
-        hideElement$1("#desktopView");
-    }
-    function responsiveHack() {
-        $("#phoneView").removeClass("position-absolute");
-        {
-            $("#phoneView").addClass("d-none");
-        }
-        $("#loadingModal").remove();
-    }
-
-    let editors = createEditors();
-    function getEditors() {
-        return editors;
-    }
-
-    function applyTheme(theme) {
-        SetEditorTheme(theme.extensions, getEditors()[0]);
-        const root = $(":root")[0];
-        root.style.setProperty("--editor-color", theme.color);
-        root.style.setProperty("--editor-background", theme.backgroundColor);
-        root.style.setProperty("--editor-gutter-bg", theme.gutterBackgroundColor);
-        root.style.setProperty("--editor-gutter", theme.gutterColor);
-    }
-
-    const DarkCodeTheme = {
-        color: "#9CDCFE",
-        backgroundColor: "#1F1F1F",
-        gutterBackgroundColor: "#1F1F1F",
-        gutterColor: "#6e7681",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#DCDCAA" },
-                { tag: tags.className, color: "#4EC9B0" },
-                { tag: tags.keyword, color: "#C586C0" },
-                { tag: tags.controlKeyword, color: "#C586C0" },
-                { tag: tags.definitionKeyword, color: "#569CD6" },
-                { tag: tags.number, color: "#b5cea8" },
-                { tag: tags.operator, color: "#efefef" },
-                { tag: tags.brace, color: "#FFD700" },
-                { tag: tags.blockComment, color: "#6A9955", fontStyle: "italic" },
-                { tag: tags.comment, color: "#6A9955", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#DCDCAA" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#b3c6c7"
-                }
-            })
-        ]
-    };
-    const LightCodeTheme = {
-        color: "#0451A5",
-        backgroundColor: "#FAFAFA",
-        gutterBackgroundColor: "#FAFAFA",
-        gutterColor: "#6e7681",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#795E26" },
-                { tag: tags.className, color: "#4EC9B0" },
-                { tag: tags.keyword, color: "#AF00DB" },
-                { tag: tags.controlKeyword, color: "#AF00DB" },
-                { tag: tags.definitionKeyword, color: "#569CD6" },
-                { tag: tags.number, color: "#098658" },
-                { tag: tags.operator, color: "#050505" },
-                { tag: tags.brace, color: "#0431FA" },
-                { tag: tags.blockComment, color: "#008000", fontStyle: "italic" },
-                { tag: tags.comment, color: "#008000", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#795E26" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#b3c6c7"
-                }
-            })
-        ]
-    };
-
-    const darkClassicHighlight = {
-        color: "var(--bs-body-color)",
-        backgroundColor: "rgba(var(--bs-body-bg-rgb), var(--bs-bg-opacity))",
-        gutterBackgroundColor: "var(--bs-secondary-bg)",
-        gutterColor: "var(--bs-emphasis-color)",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#93bf74" },
-                { tag: tags.keyword, color: "#C586C0" },
-                { tag: tags.className, color: "#C586C0" },
-                { tag: tags.brace, color: "#94a4cb" },
-                { tag: tags.number, color: "#569CD6" },
-                { tag: tags.operator, color: "#77a1d5" },
-                { tag: tags.blockComment, color: "#a0b6b6", fontStyle: "italic" },
-                { tag: tags.comment, color: "#a0b6b6", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#9CDCFE" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#4e4d48"
-                }
-            })
-        ]
-    };
-
-    const OMIHighlight = {
-        color: "#FFFF00",
-        backgroundColor: "#000080",
-        gutterBackgroundColor: "#F5F5F5",
-        gutterColor: "#000000",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#00FFFF" },
-                { tag: tags.keyword, color: "#00FFFF" },
-                { tag: tags.controlKeyword, color: "#00FFFF" },
-                { tag: tags.definitionKeyword, color: "#00FFFF" },
-                { tag: tags.number, color: "#FF00FF" },
-                { tag: tags.operator, color: "#00FFFF" },
-                { tag: tags.brace, color: "#00FFFF" },
-                { tag: tags.constant(tags.variableName), color: "#00FFFF" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#0000FF"
-                }
-            })
-        ]
-    };
-
-    const ReKarelHighlight = {
-        color: "#fafafa",
-        backgroundColor: "var(--bs-dark)",
-        gutterBackgroundColor: "var(--bs-secondary-bg)",
-        gutterColor: "var(--bs-emphasis-color)",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#ffda6a" },
-                { tag: tags.keyword, color: "#ea868f" },
-                { tag: tags.brace, color: "#ea868f" },
-                { tag: tags.controlKeyword, color: "#6ea8fe" },
-                { tag: tags.definitionKeyword, color: "#6ea8fe" },
-                { tag: tags.number, color: "#ffda6a" },
-                { tag: tags.operator, color: "#77a1d5" },
-                { tag: tags.blockComment, color: "#75b798", fontStyle: "italic" },
-                { tag: tags.comment, color: "#75b798", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#6edff6" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#4e4d48"
-                }
-            })
-        ]
-    };
-    const LightReKarelHighlight = {
-        color: "#2e2e2e",
-        backgroundColor: "var(--bs-light)",
-        gutterBackgroundColor: "var(--bs-secondary-bg)",
-        gutterColor: "var(--bs-emphasis-color)",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#ff9c07" },
-                { tag: tags.keyword, color: "#c62e3d" },
-                { tag: tags.brace, color: "#c62e3d" },
-                { tag: tags.controlKeyword, color: "#0d6efd " },
-                { tag: tags.definitionKeyword, color: "#0d6efd " },
-                { tag: tags.number, color: "#ff9c07" },
-                { tag: tags.operator, color: "#77a1d5" },
-                { tag: tags.blockComment, color: "#198754", fontStyle: "italic" },
-                { tag: tags.comment, color: "#198754", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#24a7db" },
-            ])),
-        ]
-    };
-
-    const SepiaTheme = {
-        color: "#3a3d42",
-        backgroundColor: "#fffde5",
-        gutterBackgroundColor: "#d9ceb6",
-        gutterColor: "#2d2e3b",
-        extensions: [
-            syntaxHighlighting(HighlightStyle.define([
-                { tag: tags.atom, color: "#707894" },
-                { tag: tags.keyword, color: "#cb3551" },
-                { tag: tags.controlKeyword, color: "#3f9c4f" },
-                { tag: tags.definitionKeyword, color: "#3f9c4f" },
-                { tag: tags.number, color: "#22867e" },
-                { tag: tags.operator, color: "#3f9c4f" },
-                { tag: tags.blockComment, color: "#973d1a", fontStyle: "italic" },
-                { tag: tags.comment, color: "#973d1a", fontStyle: "italic" },
-                { tag: tags.constant(tags.variableName), color: "#1f34a1" },
-            ])),
-            EditorView.theme({
-                '&.cm-focused .cm-selectionBackground, ::selection': {
-                    backgroundColor: "#b3c6c7"
-                }
-            })
-        ]
-    };
-
-    const DarkEditorThemes = {
-        'classic': darkClassicHighlight,
-        'rekarel': ReKarelHighlight,
-        'sepia': SepiaTheme,
-        'omi': OMIHighlight,
-        'code': DarkCodeTheme,
-    };
-    const LightEditorThemes = {
-        'classic': classicHighlight,
-        'rekarel': LightReKarelHighlight,
-        'sepia': SepiaTheme,
-        'omi': OMIHighlight,
-        'code': LightCodeTheme,
-    };
-
-    function SetLightTheme(theme) {
-        $(":root").attr("data-bs-theme", "light");
-        applyTheme(LightEditorThemes[theme]);
-    }
-    function SetDarkTheme(theme) {
-        $(":root").attr("data-bs-theme", "dark");
-        applyTheme(DarkEditorThemes[theme]);
-    }
-    function SetSystemTheme(theme) {
-        if (window.matchMedia) {
-            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                SetDarkTheme(theme);
-            }
-            else {
-                SetLightTheme(theme);
-            }
-            return;
-        }
-        SetLightTheme(theme); //Default light theme
-    }
-
-    const APP_SETTING = 'appSettings';
-    const SETTINGS_VERSION = "0.5.0";
-    let appSettings = {
-        version: SETTINGS_VERSION,
-        interface: "desktop",
-        editorTheme: "classic",
-        editorFontSize: 12,
-        theme: "system",
-        worldRendererStyle: DefaultWRStyle
-    };
-    function isFontSize(str) {
-        return 6 < str && str < 31;
-    }
-    function isResponsiveInterfaces(str) {
-        return ["auto", "desktop", "mobile"].indexOf(str) > -1;
-    }
-    function isTheme(str) {
-        return ["system", "light", "dark"].indexOf(str) > -1;
-    }
-    let DesktopUI$1;
-    function applySettings(settings, desktopUI) {
-        switch (settings.interface) {
-            case "auto":
-                SetResponsiveness();
-                break;
-            case "desktop":
-                SetDesktopView();
-                break;
-            case "mobile":
-                SetPhoneView();
-                break;
-            default:
-                SetDesktopView();
-                break;
-        }
-        if (!(settings.editorTheme in DarkEditorThemes))
-            settings.editorTheme = "classic";
-        switch (settings.theme) {
-            case "system":
-                SetSystemTheme(settings.editorTheme);
-                break;
-            case "light":
-                SetLightTheme(settings.editorTheme);
-                break;
-            case "dark":
-                SetDarkTheme(settings.editorTheme);
-                break;
-            default:
-                SetDarkTheme(settings.editorTheme);
-        }
-        const root = $(":root")[0];
-        root.style.setProperty("--editor-font-size", `${settings.editorFontSize}pt`);
-        root.style.setProperty("--waffle-color", `${settings.worldRendererStyle.waffleColor}`);
-        if (settings.interface == "desktop")
-            desktopUI.ResizeCanvas();
-        desktopUI.worldController.renderer.style = settings.worldRendererStyle;
-        desktopUI.worldController.Update();
-        if (localStorage)
-            localStorage.setItem(APP_SETTING, JSON.stringify(appSettings));
-    }
-    function setSettings(event, desktopUI) {
-        let interfaceType = $("#settingsForm select[name=interface]").val();
-        let fontSize = $("#settingsForm input[name=fontSize]").val();
-        let theme = $("#settingsForm select[name=theme]").val();
-        let style = $("#settingsForm select[name=editorStyle]").val();
-        console.log(fontSize);
-        if (isResponsiveInterfaces(interfaceType)) {
-            appSettings.interface = interfaceType;
-        }
-        if (isFontSize(fontSize)) {
-            appSettings.editorFontSize = fontSize;
-        }
-        if (isTheme(theme)) {
-            appSettings.theme = theme;
-        }
-        appSettings.editorTheme = style;
-        console.log(appSettings);
-        applySettings(appSettings, desktopUI);
-        event.preventDefault();
-        return false;
-    }
-    function loadSettingsFromMemory() {
-        const jsonString = localStorage === null || localStorage === void 0 ? void 0 : localStorage.getItem(APP_SETTING);
-        if (jsonString) {
-            const memorySettings = JSON.parse(jsonString);
-            if (memorySettings.version == null)
-                return;
-            if (memorySettings.version !== SETTINGS_VERSION) {
-                localStorage.removeItem(memorySettings);
-                return;
-            }
-            appSettings = memorySettings;
-        }
-    }
-    function loadSettingsToModal() {
-        console.log("show", appSettings);
-        $("#settingsInterface").val(appSettings.interface);
-        $("#settingsFontSize").val(appSettings.editorFontSize);
-        $("#settingsTheme").val(appSettings.theme);
-        $("#settingsStyle").val(appSettings.editorTheme);
-    }
-    function InitSettings(desktopUI) {
-        DesktopUI$1 = desktopUI;
-        loadSettingsFromMemory();
-        $("#settingsModal").on("show.bs.modal", (e) => {
-            loadSettingsToModal();
-        });
-        $("#settingsForm").on("submit", (e) => {
-            setSettings(e, desktopUI);
-        });
-    }
-    function StartSettings(desktopUI) {
-        applySettings(appSettings, desktopUI);
-        $(document).on("keydown", (e) => {
-            if (e.ctrlKey && e.which === 75) {
-                let fontSize = appSettings.editorFontSize;
-                fontSize--;
-                if (fontSize < 7)
-                    fontSize = 7;
-                appSettings.editorFontSize = fontSize;
-                applySettings(appSettings, desktopUI);
-                e.preventDefault();
-                return false;
-            }
-            if (e.ctrlKey && e.which === 76) {
-                let fontSize = appSettings.editorFontSize;
-                fontSize++;
-                if (fontSize > 30)
-                    fontSize = 30;
-                appSettings.editorFontSize = fontSize;
-                applySettings(appSettings, desktopUI);
-                e.preventDefault();
-                return false;
-            }
-        });
-    }
-    function SetWorldRendererStyle(style) {
-        appSettings.worldRendererStyle = style;
-        applySettings(appSettings, DesktopUI$1);
-    }
-    function GetCurrentSetting() { return appSettings; }
 
     function parseFormData() {
         return {
@@ -26684,6 +27000,12 @@
         ui.countTurns.prop("checked", kcInstance.world.getDumps(World.DUMP_LEFT));
         ui.countPicks.prop("checked", kcInstance.world.getDumps(World.DUMP_PICK_BUZZER));
         ui.countPuts.prop("checked", kcInstance.world.getDumps(World.DUMP_LEAVE_BUZZER));
+        ui.maxInstructions.val(kcInstance.world.maxInstructions);
+        ui.maxStackSize.val(kcInstance.world.maxStackSize);
+        ui.maxMove.val(kcInstance.world.maxMove);
+        ui.maxTurnLeft.val(kcInstance.world.maxTurnLeft);
+        ui.maxPickBuzzer.val(kcInstance.world.maxPickBuzzer);
+        ui.maxLeaveBuzzer.val(kcInstance.world.maxLeaveBuzzer);
     }
     function setData(ui) {
         console.log("SetDATA?");
@@ -26696,6 +27018,29 @@
         kcInstance.world.setDumps(World.DUMP_LEFT, ui.countTurns.prop("checked"));
         kcInstance.world.setDumps(World.DUMP_PICK_BUZZER, ui.countPicks.prop("checked"));
         kcInstance.world.setDumps(World.DUMP_LEAVE_BUZZER, ui.countPuts.prop("checked"));
+        function validateMax(inputVal, min = 1) {
+            const isInteger = Number.isInteger(Number(inputVal));
+            const isValid = isInteger && Number(inputVal) >= min;
+            return isValid;
+        }
+        const maxInstructions = ui.maxInstructions.val();
+        const maxStackSize = ui.maxStackSize.val();
+        const maxMove = ui.maxMove.val();
+        const maxTurnLeft = ui.maxTurnLeft.val();
+        const maxPickBuzzer = ui.maxPickBuzzer.val();
+        const maxLeaveBuzzer = ui.maxLeaveBuzzer.val();
+        if (validateMax(maxInstructions))
+            kcInstance.world.maxInstructions = maxInstructions;
+        if (validateMax(maxStackSize))
+            kcInstance.world.maxStackSize = maxStackSize;
+        if (validateMax(maxMove, -1))
+            kcInstance.world.maxMove = maxMove;
+        if (validateMax(maxTurnLeft, -1))
+            kcInstance.world.maxTurnLeft = maxTurnLeft;
+        if (validateMax(maxPickBuzzer, -1))
+            kcInstance.world.maxPickBuzzer = maxPickBuzzer;
+        if (validateMax(maxLeaveBuzzer, -1))
+            kcInstance.world.maxLeaveBuzzer = maxLeaveBuzzer;
     }
     function HookEvaluatorModal(ui) {
         ui.modal.on("show.bs.modal", () => getData(ui));
@@ -26762,7 +27107,26 @@
         }
     }
 
+    function RegisterHighlightListeners() {
+        const editor = getEditors()[0];
+        const controller = KarelController.GetInstance();
+        controller.RegisterStepController((_, state) => {
+            const line = controller.GetRuntime().state.line + 1;
+            const codeLine = editor.state.doc.line(line);
+            HighlightKarelLine(editor, line);
+            editor.dispatch({
+                effects: EditorView.scrollIntoView(codeLine.from)
+            });
+        });
+        controller.RegisterResetObserver((_) => {
+            HighlightKarelLine(editor, -1);
+        });
+    }
+
+    let KarelWorld = new World(100, 100);
+    let karelController = new KarelController(KarelWorld);
     var [desktopEditor, phoneEditor] = getEditors();
+    RegisterHighlightListeners();
     //TODO: ThisShouldnt be here
     function hideElement(element) {
         $(element).addClass("d-none");
@@ -26770,8 +27134,6 @@
     function showElement(element) {
         $(element).removeClass("d-none");
     }
-    let KarelWorld = new World(100, 100);
-    let karelController = new KarelController(KarelWorld, desktopEditor);
     const pascalConfirm = {
         accept: () => {
             SetText(desktopEditor, "iniciar-programa\n\tinicia-ejecucion\n\t\t{ TODO poner codigo aqui }\n\t\tapagate;\n\ttermina-ejecucion\nfinalizar-programa");
@@ -26986,6 +27348,12 @@
             countPicks: $("#countPicks"),
             countPuts: $("#countPuts"),
             countTurns: $("#countTurns"),
+            maxInstructions: $("#maxInstructions"),
+            maxStackSize: $("#maxStack"),
+            maxMove: $("#maxMove"),
+            maxTurnLeft: $("#maxTurnLeft"),
+            maxPickBuzzer: $("#maxPickBuzzer"),
+            maxLeaveBuzzer: $("#maxLeaveBuzzer"),
         },
         confirmModal: {
             modal: "#confirmModal",
@@ -27048,5 +27416,12 @@
         StartSettings(DesktopUI);
         RestoreSession();
     });
+    function MoveEditorCursorToLine(line, column = 0) {
+        SelectLine(desktopEditor, line, column);
+    }
 
-})(bootstrap);
+    exports.MoveEditorCursorToLine = MoveEditorCursorToLine;
+
+    return exports;
+
+})({}, bootstrap);

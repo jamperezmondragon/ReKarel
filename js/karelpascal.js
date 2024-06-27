@@ -96,15 +96,40 @@ case 4: case 23: case 39:
  this.$ = $$[$0-1]; 
 break;
 case 5:
- this.$ = [[$$[$0].toLowerCase(), null, 1, $$[$0-1][0][1]]]; 
+ 
+      this._$.first_line = _$[$0-2].first_line;
+      this._$.first_column = _$[$0-2].first_column;
+      this._$.last_line = _$[$0].last_line;
+      this._$.last_column = _$[$0].last_column;
+      this.$ = [[$$[$0].toLowerCase(), null, 1, $$[$0-1][0][1], this._$] ]; 
+    
 break;
 case 6:
- this.$ = [[$$[$0-3].toLowerCase(), null, 2, $$[$0-4][0][1]]]; 
+ 
+      this._$.first_line = _$[$0-5].first_line;
+      this._$.first_column = _$[$0-5].first_column;
+      this._$.last_line = _$[$0].last_line;
+      this._$.last_column = _$[$0].last_column;
+      this.$ = [[$$[$0-3].toLowerCase(), null, 2, $$[$0-4][0][1], this._$]]; 
+      
 break;
 case 7:
- this.$ = [[$$[$0-2].toLowerCase(), $$[$0-3].concat($$[$0]).concat([['RET']]), 1, $$[$0-3][0][1]]]; 
+ 
+      this._$.first_line = _$[$0-4].first_line;
+      this._$.first_column = _$[$0-4].first_column;
+      this._$.last_line = _$[$0-2].last_line;
+      this._$.last_column = _$[$0-2].last_column;
+
+      this.$ = [[$$[$0-2].toLowerCase(), $$[$0-3].concat($$[$0]).concat([['RET']]), 1, $$[$0-3][0][1], this._$, this._$]]; 
+    
 break;
 case 8:
+
+      
+      this._$.first_line = _$[$0-7].first_line;
+      this._$.first_column = _$[$0-7].first_column;
+      this._$.last_line = _$[$0-5].last_line;
+      this._$.last_column = _$[$0-5].last_column;
 
     	var result = $$[$0-6].concat($$[$0]).concat([['RET']]);
       var current_line = $$[$0-6][0][1];
@@ -116,13 +141,14 @@ case 8:
     				result[i][1] = 0;
     			} else {
     				yy.parser.parseError("Unknown variable: " + $$[$0-3], {
-              text: $$[$0-3],
-              line: current_line + 1
+              text: result[i][1],
+              line: current_line + 1,
+              loc:result[i][2]
             });
     			}
     		}
     	}
-    	this.$ = [[$$[$0-5].toLowerCase(), result, 2, $$[$0-6][0][1]]];
+    	this.$ = [[$$[$0-5].toLowerCase(), result, 2, $$[$0-6][0][1],this._$, _$[$0-3]]];
     
 break;
 case 9:
@@ -153,10 +179,10 @@ case 18:
  this.$ = [['LINE', yylineno], ['RET']]; 
 break;
 case 24:
-  this.$ = [['LINE', yylineno] ].concat($$[$0-3]).concat($$[$0]).concat([['MEMORIZE']]); 
+ this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0].toLowerCase(), 1, _$[$0], _$[$0]], ['LINE', yylineno]]; 
 break;
 case 25:
- this.$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $$[$0].toLowerCase(), 1], ['LINE', yylineno]]; 
+ this.$ = [['LINE', yylineno]].concat($$[$0-1]).concat([['CALL', $$[$0-3].toLowerCase(), 2, _$[$0-3], _$[$0-1]], ['LINE', yylineno]]); 
 break;
 case 26:
  this.$ = [['LINE', yylineno]].concat($$[$0-1]).concat([['CALL', $$[$0-3].toLowerCase(), 2], ['LINE', yylineno]]); 
@@ -339,7 +365,7 @@ parse: function parse(input) {
                     text: lexer.match,
                     token: this.terminals_[symbol] || symbol,
                     line: lexer.yylineno,
-                    loc: yyloc,
+                    loc: lexer.yylloc, // Implement fix: https://github.com/zaach/jison/pull/356
                     expected: expected
                 });
             }
@@ -420,7 +446,8 @@ function validate(function_list, program, yy) {
 			if (prototypes[function_list[i][0]] || functions[function_list[i][0]]) {
 				yy.parser.parseError("Prototype redefinition: " + function_list[i][0], {
 					text: function_list[i][0],
-					line: function_list[i][3]
+					line: function_list[i][3],
+          loc: function_list[i][4],
 				});
 			}
 			prototypes[function_list[i][0]] = function_list[i][2];
@@ -428,13 +455,15 @@ function validate(function_list, program, yy) {
 			if (functions[function_list[i][0]]) {
 				yy.parser.parseError("Function redefinition: " + function_list[i][0], {
 					text: function_list[i][0],
-					line: function_list[i][3]
+					line: function_list[i][3],
+          loc: function_list[i][4]
 				});
 			} else if (prototypes[function_list[i][0]]) {
 				if (prototypes[function_list[i][0]] != function_list[i][2]) {
 					yy.parser.parseError("Prototype parameter mismatch: " + function_list[i][0], {
 						text: function_list[i][0],
-						line: function_list[i][3]
+						line: function_list[i][3],
+            loc: function_list[i][5]
 					});
 				}
 			}
@@ -454,7 +483,8 @@ function validate(function_list, program, yy) {
 						!prototypes[function_list[i][1][j][1]]) {
 					yy.parser.parseError("Undefined function: " + function_list[i][1][j][1], {
 						text: function_list[i][1][j][1],
-						line: current_line
+						line: current_line,
+            loc: function_list[i][1][j][4]
 					});
 				}
 			}
@@ -471,21 +501,32 @@ function validate(function_list, program, yy) {
 			if (!functions[program[i][1]]) {
 				yy.parser.parseError("Undefined function: " + program[i][1], {
 					text: program[i][1],
-					line: current_line
+					line: current_line,
+          loc: program[i][3]
 				});
 			} else if (prototypes[program[i][1]] != program[i][2]) {
 				yy.parser.parseError("Function parameter mismatch: " + program[i][1], {
 					text: program[i][1],
-					line: current_line
+					line: current_line,
+          loc: program[i][4],          
+          parameters: program[i][2],
 				});
 			}
 			program[i][2] = program[i][1];
 			program[i][1] = functions[program[i][1]];
-		} else if (program[i][0] == 'PARAM' && program[i][1] != 0) {
-			yy.parser.parseError("Unknown variable: " + program[i][1], {
-				text: program[i][1],
-				line: current_line
-			});
+      // Remove loc data which is only for error parsing
+      program[i].pop();
+      program[i].pop(); 
+		} else if (program[i][0] == 'PARAM') {
+      if (program[i][1] != 0) {
+        yy.parser.parseError("Unknown variable: " + program[i][1], {
+          text: program[i][1],
+          line: current_line,
+          loc: program[i][2]
+        });
+      } else {
+        program[i].pop();
+      }
 		}
 	}
 
@@ -993,7 +1034,7 @@ if (typeof module !== 'undefined' && require.main === module) {
   exports.main(process.argv.slice(1));
 }
 }
-
-function pascalParser () { return karelpascal.parse.apply(karelpascal, arguments); }
-
+function pascalParser () {
+    return karelpascal.parse.apply(karelpascal, arguments);
+}
 export {karelpascal, pascalParser}

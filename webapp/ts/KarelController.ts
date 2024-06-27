@@ -2,7 +2,13 @@ import { World, compile, detectLanguage } from "../../js/karel";
 // import { WorldViewController } from "./worldViewController";
 import { EditorView } from "codemirror";
 import { decodeRuntimeError } from "./errorCodes";
-import { breakpointState, setLanguage } from "./editor/editor";
+import { setLanguage } from "./editor/editor";
+import { GetCurrentSetting } from "./settings";
+import { throbber } from "./throbber";
+import { getEditors } from "./editor/editorsInstances";
+import { Callbacks } from "jquery";
+import { CheckForBreakPointOnLine } from "./editor/editor.breakpoint";
+import { clearUnderlineError, underlineError } from "./editor/editor.parseErrorUnderline";
 
 type messageType = "info"|"success"|"error"|"raw"|"warning";
 type MessageCallback = (message:string, type:messageType)=>void;
@@ -12,6 +18,7 @@ type StepCallback = (caller:KarelController, newState:ControllerState)=>void;
 type ResetCallback = (caller:KarelController)=>void;
 type NewWorldCallback = (caller:KarelController, world:World, newInstance:boolean)=>void;
 type CompileCallback = (caller:KarelController, success:boolean, language:string)=>void;
+type SlowModeCallback = (caller:KarelController, limit:number)=>void;
 class KarelController {
     
     private static instance:KarelController
@@ -20,29 +27,29 @@ class KarelController {
     world: World;
     // desktopController: WorldViewController;
     running: boolean;
-    mainEditor: EditorView;
     private onMessage: MessageCallback[];
     private onStateChange: StateChangeCallback[];
     private onStep: StepCallback[];
     private onReset: ResetCallback[];
     private onNewWorld: NewWorldCallback[];
     private onCompile: CompileCallback[];
+    private onSlowMode: SlowModeCallback[];
     private state : ControllerState;
     private endedOnError:boolean;
     private autoStepInterval:number;
     private drawFrameRequest : number;
     private autoStepping: boolean;
 
-    constructor(world: World, mainEditor: EditorView) {
+    constructor(world: World) {
         this.world = world;
         this.running = false;
-        this.mainEditor = mainEditor;
         this.onMessage = [];
         this.onStateChange = [];
         this.onStep = [];
         this.onReset= [];
         this.onNewWorld= [];
         this.onCompile= [];
+        this.onSlowMode = [];
         this.state = "unstarted";
         this.endedOnError = false;
         this.autoStepInterval = 0;
@@ -63,16 +70,18 @@ class KarelController {
     // }
 
     Compile(notifyOnSuccess:boolean = true) {
-        let code = this.mainEditor.state.doc.toString();
+        const mainEditor = getEditors()[0];
+        let code = mainEditor.state.doc.toString();
 
         // let language: string = detectLanguage(code);
         let language = detectLanguage(code) as "java" | "pascal" | "ruby" | "none";
             
         if (language === "java" || language === "pascal") {
-            setLanguage(this.mainEditor, language);
+            setLanguage(mainEditor, language);
         }
         let response = null;
         try {
+            clearUnderlineError(mainEditor)
             response = compile(code);
             //TODO: expand message       
             if (notifyOnSuccess)     
@@ -81,7 +90,10 @@ class KarelController {
         } catch (e) {            
             //TODO: Expand error
             this.SendMessage(decodeError(e, language), "error");
-            
+            if (e.hash.loc) {
+                const status = e.hash;
+                underlineError(mainEditor, status.loc.first_line, status.loc.first_column, status.loc.last_column);
+            }
             this.NotifyCompile(false, language);
             return null;
         }
@@ -141,48 +153,19 @@ class KarelController {
 
     CheckForBreakPointOnCurrentLine():boolean {
         let runtime= this.GetRuntime();
-        if (runtime.state.line >= 0) {          
-            
-            let codeLine = this
-                .mainEditor
-                .state
-                .doc
-                .line(
-                    runtime.state.line+1
-                );
-                codeLine.from
-                let breakpoints = this.mainEditor.state.field(breakpointState)
-                let hasBreakpoint = false
-                breakpoints.between(codeLine.from,codeLine.from, () => {hasBreakpoint = true})
-                if (hasBreakpoint) {                    
-                    this.BreakPointMessage(codeLine.number);
-                }
-                return hasBreakpoint;
+        if (runtime.state.line >= 0) {            
+            const mainEditor = getEditors()[0];
+            let hasBreakpoint = CheckForBreakPointOnLine(mainEditor, runtime.state.line+1)       
+            if (hasBreakpoint) {                    
+                this.BreakPointMessage(runtime.state.line +1);
+            }
+            return hasBreakpoint;
+           
         }
         return false;
       }
     
 
-    HighlightCurrentLine() {
-        let runtime= this.GetRuntime();
-        if (runtime.state.line >= 0) {          
-            
-            let codeLine = this
-                .mainEditor
-                .state
-                .doc
-                .line(
-                    runtime.state.line+1
-                );
-            this.mainEditor.dispatch({
-                selection:{
-                    anchor: codeLine.from,
-                    head: codeLine.from
-                },
-                scrollIntoView: true,             
-            });
-        }
-      }
 
     Step() {
         if (!this.StartStep()) return;
@@ -199,10 +182,16 @@ class KarelController {
         const startWStackSize = runtime.state.stackSize;
         runtime.step();
         if (runtime.state.stackSize > startWStackSize) {
-            while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize);
-            runtime.step();
+            throbber.performTask(
+                ()=> {
+                    while (this.PerformAutoStep() && runtime.state.stackSize > startWStackSize);
+                    runtime.step();
+                }
+            )
+            .then(()=> this.EndStep())
+        } else {
+            this.EndStep();
         }
-        this.EndStep();
     }
 
     StepOut() {
@@ -214,26 +203,29 @@ class KarelController {
             this.RunTillEnd();
             return;
         }
-        while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize);
-        this.EndStep();
+        throbber.performTask(
+            ()=> {
+                while (this.PerformAutoStep() && runtime.state.stackSize >= startWStackSize);
+            }
+        ).then(_=>this.EndStep());
     }
 
     StartAutoStep(delay:number) {        
         this.StopAutoStep(); //Avoid thread leak
         if (this.state === "finished") {
-            return;
+            return false;
         }
         this.autoStepping = true;
         if (!this.running) {
             if (!this.StartRun()) {
                 //Code Failed
-                return;
+                return false;
             }
         }
         if (this.state !== "running") {
             this.ChangeState("running");
         }
-        this.autoStepInterval = setInterval(
+        this.autoStepInterval = window.setInterval(
             ()=>{
                 if (!this.running) {
                     this.StopAutoStep();
@@ -243,6 +235,7 @@ class KarelController {
             }, 
             delay
         );
+        return true;
     }
 
     ChangeAutoStepDelay(delay:number) {
@@ -277,21 +270,19 @@ class KarelController {
         let runtime = this.GetRuntime();
         // runtime.disableStackEvents= false; // FIXME: This should only be done when no breakpoints
         // runtime.disableStackEvents= true; // FIXME: This should only be done when no breakpoints
-        while (this.PerformAutoStep(ignoreBreakpoints));
-        
+        throbber.performTask(()=> {
+            while (this.PerformAutoStep(ignoreBreakpoints));
+        }).then(_=> {
 
-        // this.desktopController.CheckUpdate();
-        
-        this.HighlightCurrentLine();
+            if (!runtime.state.running) {
+                this.EndMessage();
+                this.ChangeState("finished");
+            } else {
+                this.Pause();
+            }
 
-        if (!runtime.state.running) {
-            this.EndMessage();
-            this.ChangeState("finished");
-        } else {
-            this.Pause();
-        }
-
-        this.NotifyStep();
+            this.NotifyStep();
+        });
     }
 
     RegisterMessageCallback(callback: MessageCallback) {
@@ -316,6 +307,10 @@ class KarelController {
 
     RegisterCompileObserver(callback: CompileCallback) {
         this.onCompile.push(callback);
+    }
+
+    RegisterSlowModeObserver(callback: SlowModeCallback) {
+        this.onSlowMode.push(callback);
     }
 
     Resize(w:number, h:number) {
@@ -353,7 +348,6 @@ class KarelController {
     }
 
     private EndStep() {
-        this.HighlightCurrentLine();
         
         if (!this.GetRuntime().state.running) {            
             this.EndMessage();
@@ -371,10 +365,11 @@ class KarelController {
     private PerformAutoStep(ignoreBreakpoints:boolean = false) {
         const runtime = this.GetRuntime();
         const result = runtime.step();
-        
-        if (runtime.state.ic >= 200000 && !runtime.disableStackEvents) {
+        const slowLimit = GetCurrentSetting().slowExecutionLimit; 
+        if (runtime.state.ic >=  slowLimit&& !runtime.disableStackEvents) {
             runtime.disableStackEvents = true;
-            this.SendMessage("Karel alcanzó las 200,000 instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse", "warning");
+            this.SendMessage(`Karel alcanzó las ${slowLimit.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} instrucciones, Karel cambiará al modo rápido de ejecución, la pila de llamadas dejará de actualizarse`, "warning");
+            this.NotifySlowMode(slowLimit);
         }
         
         
@@ -402,6 +397,10 @@ class KarelController {
     }
     private NotifyCompile(success:boolean, language:string) {
         this.onCompile.forEach((callback) => callback(this, success, language));
+    }
+
+    private NotifySlowMode(limit:number) {
+        this.onSlowMode.forEach((callback)=>callback(this, limit));
     }
 
     
@@ -553,15 +552,26 @@ const ERROR_TOKENS = {
     },
   };
 
+function jumpable(line:number, column:number | null) {
+    let c = column;
+    if (column == null) {
+        c=0;
+    }
+    const onclick = `karel.MoveEditorCursorToLine(${line}, ${c})`
+    return `<a class="text-decoration-underline" href="#" title="Haz clic para ir al error" onclick="${onclick}">línea ${line}</a>`;
+}
+
 function decodeError(e, lan : "java"|"pascal"|"ruby"|"none") : string {
     if (lan === "ruby" || lan === "none") {
         return "Error de compilación, no se puede reconocer el lenguaje";
     }
     let status = e.hash;
+    console.log(JSON.stringify(e))
+    console.log(e)
     if (status == null) {
         return "Error de compilación";
     }
-    let message = `Error de compilación en la línea ${status.line +1}\n<br>\n<div class="card"><div class="card-body">`
+    let message = `Error de compilación en  la ${jumpable(status.line+1,status?.loc.first_column )}\n<br>\n<div class="card"><div class="card-body">`
     if (status.expected) {        
         let expectations = status.expected.map((x=>ERROR_TOKENS[lan][x.replace(/^'+/,"").replace(/'+$/,"") ]))        
         message += `Se encontró "${status.text}" cuando se esperaba ${ expectations.join(", ")}`
@@ -575,6 +585,16 @@ function decodeError(e, lan : "java"|"pascal"|"ruby"|"none") : string {
             message += `La función <b>${status.text}</b> ya fue definida previamente`;
         } else if (errorString.includes("Prototype redefinition")) {
             message += `El prototipo <b>${status.text}</b> ya fue definido previamente`;
+        } else if (errorString.includes("Unknown variable")) {
+            message += `El parámetro <b>${status.text}</b> no está definido`;
+        } else if (errorString.includes("Function parameter mismatch")) {
+            if (status.parameters=== 2) {
+                message += `La función <b>${status.text}</b> no acepta parámetro `;
+            } else {
+                message += `La función <b>${status.text}</b> esperaba un parámetro `;
+            }
+        } else if (errorString.includes("Prototype parameter mismatch")) {
+            message += `La función <b>${status.text}</b> tiene un número distinto de parámetros que su prototipo `;
         } else {
             message += "Error desconocido"
         }

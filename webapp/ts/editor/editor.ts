@@ -1,6 +1,6 @@
-import {EditorState} from "@codemirror/state"
+import {EditorState, Facet,RangeSetBuilder} from "@codemirror/state"
 import {defaultKeymap, historyKeymap, history} from "@codemirror/commands"
-import {drawSelection, keymap, lineNumbers, highlightActiveLine, GutterMarker,gutter} from "@codemirror/view"
+import {drawSelection, keymap, lineNumbers, highlightActiveLine, GutterMarker,gutter, Decoration, DecorationSet, ViewPlugin,  ViewUpdate} from "@codemirror/view"
 import {indentWithTab} from "@codemirror/commands"
 import {undo, redo} from "@codemirror/commands"
 import {EditorView} from "@codemirror/view"
@@ -13,64 +13,16 @@ import { closeBrackets, autocompletion } from "@codemirror/autocomplete"
 import { darkClassicHighlight } from "./themes/darkClassicHighlight"
 import { classicHighlight } from "./themes/classicHighlight"
 import {HighlightStyle} from "@codemirror/language"
+import { highlightKarelActiveLine } from "./editor.highlightLine"
+import { main } from "../../js/cindex"
+import { breakpointGutter } from "./editor.breakpoint"
 
 let language = new Compartment, tabSize = new Compartment
 let theme = new Compartment
 let readOnly = new Compartment
 
-const breakpointEffect = StateEffect.define<{pos:number, on:boolean}>({
-  map:(val, mapping)=> ({pos:mapping.mapPos(val.pos), on:val.on})
-});
-const breakpointMarker = new class extends GutterMarker {
-  toDOM() { return document.createTextNode("🔴") }
-}
 
-export const breakpointState = StateField.define<RangeSet<GutterMarker>>({
-  create() { return RangeSet.empty },
-  update(set, transaction) {
-    set = set.map(transaction.changes)
-    for (let e of transaction.effects) {
-      if (e.is(breakpointEffect)) {
-        if (e.value.on)
-          set = set.update({add: [breakpointMarker.range(e.value.pos)]})
-        else
-          set = set.update({filter: from => from != e.value.pos})
-      }
-    }
-    return set
-  }
-});
 
-function toggleBreakpoint(view: EditorView, pos: number) {
-  let breakpoints = view.state.field(breakpointState)
-  let hasBreakpoint = false
-  breakpoints.between(pos, pos, () => {hasBreakpoint = true})
-  view.dispatch({
-    effects: breakpointEffect.of({pos, on: !hasBreakpoint})
-  })
-}
-const breakpointGutter = [
-  breakpointState,
-  gutter({
-    class: "cm-breakpoint-gutter",
-    markers: v => v.state.field(breakpointState),
-    initialSpacer: () => breakpointMarker,
-    domEventHandlers: {
-      mousedown(view, line) {
-        toggleBreakpoint(view, line.from)
-        return true
-      }
-    }
-  }),
-  EditorView.baseTheme({
-    ".cm-breakpoint-gutter .cm-gutterElement": {
-      color: "red",
-      paddingLeft: "2px",
-      cursor: "default",
-      fontSize: "var(--editor-font-size)"
-    }
-  })
-]
 
 function createEditors() : Array<EditorView> {
   let startState = EditorState.create({
@@ -80,6 +32,7 @@ function createEditors() : Array<EditorView> {
       theme.of(classicHighlight.extensions),
       syntaxHighlighting(defaultHighlightStyle, {fallback:true}),
       history(),
+      highlightKarelActiveLine(),
       breakpointGutter,
       drawSelection(),
       lineNumbers(),
@@ -98,7 +51,6 @@ function createEditors() : Array<EditorView> {
       ])
     ]
   })
-  
   let otherState = EditorState.create({
     doc: startState.doc,
     extensions: [
@@ -114,14 +66,14 @@ function createEditors() : Array<EditorView> {
     ]
   })
   let syncAnnotation = Annotation.define<boolean>()
-
+  
   function syncDispatch(tr: Transaction, view: EditorView, other: EditorView) {
     view.update([tr])
     if (!tr.changes.empty && !tr.annotation(syncAnnotation)) {
       let annotations: Annotation<any>[] = [syncAnnotation.of(true)]
       let userEvent = tr.annotation(Transaction.userEvent)
       if (userEvent) annotations.push(Transaction.userEvent.of(userEvent))
-      other.dispatch({changes: tr.changes, annotations})
+        other.dispatch({changes: tr.changes, annotations})
     }
   }
   let mainView = new EditorView({
@@ -188,4 +140,24 @@ function SetEditorTheme (extension:Extension, editor:EditorView) {
   
 }
 
-export {createEditors, freezeEditors, unfreezeEditors, setLanguage, SetText, SetEditorTheme}
+
+function SelectLine(editor:EditorView, line:number, column:number=0, shouldFocus:boolean=true) {
+  const docLine = editor.state.doc.line(line);
+  const jumpTo = docLine.from +column;
+  editor.dispatch({
+    selection: {
+      anchor: jumpTo, 
+      head: jumpTo
+      
+    },
+    scrollIntoView:true
+  });
+  if (shouldFocus) {
+    editor.focus();
+  }
+
+
+
+}
+
+export {createEditors, freezeEditors, unfreezeEditors, setLanguage, SetText, SetEditorTheme, SelectLine}

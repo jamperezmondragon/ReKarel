@@ -73,7 +73,8 @@ function validate(function_list, program, yy) {
 		if (functions[function_list[i][0]]) {
 			yy.parser.parseError("Function redefinition: " + function_list[i][0], {
 				text: function_list[i][0],
-				line: function_list[i][1][0][1]
+				line: function_list[i][1][0][1],
+        loc: function_list[i][3]
 			});
 		}
 
@@ -90,22 +91,33 @@ function validate(function_list, program, yy) {
 			if (!functions[program[i][1]] || !prototypes[program[i][1]]) {
 				yy.parser.parseError("Undefined function: " + program[i][1], {
 					text: program[i][1],
-					line: current_line
+					line: current_line,
+          loc: program[i][3]
 				});
 			} else if (prototypes[program[i][1]] != program[i][2]) {
 				yy.parser.parseError("Function parameter mismatch: " + program[i][1], {
 					text: program[i][1],
-					line: current_line
+					line: current_line,
+          loc: program[i][4],
+          parameters: program[i][2],
 				});
 			}
 
 			program[i][2] = program[i][1];
 			program[i][1] = functions[program[i][1]];
-		} else if (program[i][0] == 'PARAM' && program[i][1] != 0) {
-			yy.parser.parseError("Unknown variable: " + program[i][1], {
-				text: program[i][1],
-				line: current_line
-			});
+      // Remove loc data which is only for error parsing
+      program[i].pop();
+      program[i].pop(); 
+		} else if (program[i][0] == 'PARAM') {
+      if (program[i][1] != 0) {
+        yy.parser.parseError("Unknown variable: " + program[i][1], {
+          text: program[i][1],
+          line: current_line,
+          loc: program[i][2]
+        });
+      } else {
+        program[i].pop();
+      }
 		}
 	}
 
@@ -136,9 +148,19 @@ def_list
 
 def
   : DEF line var '(' ')' block
-    { $$ = [[$var, $line.concat($block).concat([['RET']]), 1]]; }
+    { 
+      @$.first_line = @1.first_line;
+      @$.first_column = @1.first_column;
+      @$.last_line = @3.last_line;
+      @$.last_column = @3.last_column;
+      $$ = [[$var, $line.concat($block).concat([['RET']]), 1, @$]];
+       }
   | DEF line var '(' var ')' block
     %{
+      @$.first_line = @1.first_line;
+      @$.first_column = @1.first_column;
+      @$.last_line = @3.last_line;
+      @$.last_column = @3.last_column;
     	var result = $line.concat($block).concat([['RET']]);
     	for (var i = 0; i < result.length; i++) {
     		if (result[i][0] == 'PARAM') {
@@ -146,13 +168,14 @@ def
     				result[i][1] = 0;
     			} else {
 						yy.parser.parseError("Unknown variable: " + $5, {
-							text: $5,
-							line: yylineno
+							text: result[i][1],
+							line: yylineno,
+              loc:result[i][2]
 						});
     			}
     		}
     	}
-    	$$ = [[$var, result, 2]];
+    	$$ = [[$var, result, 2,@$]];
     %}
   ;
 
@@ -195,9 +218,26 @@ expr
 
 call
   : var '(' ')'
-    { $$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $var, 1], ['LINE', yylineno]]; }
+    
+    %{ 
+      
+      var loc = {
+        first_line: @2.first_line,
+        first_column: @2.first_column,
+        last_line: @3.last_line,
+        last_column: @3.last_column,
+      };
+      $$ = [['LINE', yylineno], ['LOAD', 0], ['CALL', $var, 1, @1, loc], ['LINE', yylineno]]; 
+    %}
   | var '(' integer ')'
-    { $$ = [['LINE', yylineno]].concat($integer).concat([['CALL', $var, 2], ['LINE', yylineno]]); }
+    { 
+      @$.first_column = @1.first_column;
+      @$.first_line = @1.first_line;
+      @$.last_column = @4.last_column;
+      @$.last_line = @4.last_line;
+      ;
+      $$ = [['LINE', yylineno]].concat($integer).concat([['CALL', $var, 2, @1, @3], ['LINE', yylineno]]); 
+    }
   ;
 
 cond
@@ -290,7 +330,7 @@ bool_fun
 
 integer
   : var
-    { $$ = [['PARAM', $var]]; }
+    { $$ = [['PARAM', $var, @1]]; }
   | NUM
     { $$ = [['LOAD', parseInt(yytext)]]; }
   | INC '(' integer ')'
